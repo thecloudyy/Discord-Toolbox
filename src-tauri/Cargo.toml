@@ -2,7 +2,7 @@
 name = "discord-keep-alive"
 version = "1.0.0"
 edition = "2021"
-description = "Desktop wrapper for vc-keeper — parks a Discord account in voice channels."
+description = "Discord Toolbox — voice keep-alive and game badge tooling for Discord."
 license = "MIT"
 
 [build-dependencies]
@@ -17,3 +17,7 @@ aes-gcm = "0.10"
 base64 = "0.22"
 regex = "1"
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
+
+[features]
+# Used by release builds so the frontend is embedded instead of loaded from devUrl.
+custom-protocol = ["tauri/custom-protocol"]

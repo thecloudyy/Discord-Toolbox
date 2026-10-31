@@ -16,12 +16,15 @@ yarn-error.log*
 # Tauri
 src-tauri/target/
 src-tauri/gen/
+src-tauri/bin/
 src-tauri/Output/
+release-artifacts/
 
 # Local configuration and runtime state
 .env
 .vc-keeper.log
 .vc-keeper.state.json
+.badge-games.json
 token_debug.txt
 app_debug.txt
 *.exe

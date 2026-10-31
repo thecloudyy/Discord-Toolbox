@@ -47,17 +47,14 @@ export function Dashboard({
   onOpenLogs: () => void;
 }) {
   const name = profile.global_name || profile.username || "Discord account";
-  const tail = log
-    .split("\n")
-    .filter(Boolean)
-    .slice(-12)
-    .join("\n");
+  const tail =
+    log.split("\n").filter(Boolean).slice(-12).join("\n");
 
   return (
     <div className="space-y-5">
       <header className="flex flex-wrap items-end justify-between gap-4">
         <div>
-          <h1 className="text-2xl font-semibold tracking-tight">Dashboard</h1>
+          <h1 className="text-2xl font-semibold tracking-tight">Keep alive</h1>
           <p className="mt-1 text-sm text-muted-foreground">
             Keep your account parked in a voice channel without touching Discord.
           </p>
@@ -107,33 +104,28 @@ export function Dashboard({
         <div className="mt-4 flex flex-wrap items-center gap-2 border-t border-border/60 pt-4">
           {running ? (
             <Button variant="outline" onClick={onRestart}>
-              <RestartIcon />
-              Restart
+              <RestartIcon /> Restart
             </Button>
           ) : (
             <Button onClick={onStart}>
-              <PlayIcon />
-              Start
+              <PlayIcon /> Start
             </Button>
           )}
           <Button variant="destructive" onClick={onStop} disabled={!running}>
-            <StopIcon />
-            Stop
+            <StopIcon /> Stop
           </Button>
           <Button variant="ghost" onClick={onTerminate} disabled={!running}>
-            <PowerIcon />
-            Terminate
+            <PowerIcon /> Terminate
           </Button>
           <Button variant="ghost" className="ml-auto" onClick={onOpenLogs}>
-            <TerminalIcon />
-            View log
+            <TerminalIcon /> View log
           </Button>
         </div>
 
         {msg && <p className="mt-3 text-xs text-muted-foreground">{msg}</p>}
       </Card>
 
-      <Card className="space-y-4 p-5">
+      <Card className="p-5">
         <div className="flex items-center gap-2.5">
           <span className="ui-card flex h-8 w-8 items-center justify-center rounded-lg bg-primary/10 text-primary">
             <HashIcon />
@@ -185,7 +177,7 @@ export function Dashboard({
         </div>
       </Card>
 
-      <Card className="overflow-hidden">
+      <Card>
         <div className="flex items-center justify-between gap-3 border-b border-border/60 px-5 py-3.5">
           <div className="flex items-center gap-2">
             <TerminalIcon className="text-muted-foreground" />
@@ -201,4 +193,4 @@ export function Dashboard({
       </Card>
     </div>
   );
-}
+}

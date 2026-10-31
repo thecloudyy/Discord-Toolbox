@@ -32,23 +32,24 @@ export function AccountMenu({
     <div ref={rootRef} className="relative">
       <button
         type="button"
-        className={cx("rail-button relative", open && "rail-button-active")}
+        className={cx("rail-button", open && "rail-button-active")}
         title={name}
         aria-label={`Account: ${name}`}
         aria-expanded={open}
         onClick={() => setOpen((value) => !value)}
       >
         <Avatar url={profile.avatar_url} name={name} className="h-7 w-7 text-xs" />
+        <span className="min-w-0 flex-1 truncate text-[13px] font-medium">{name}</span>
         <span
           className={cx(
-            "absolute right-0.5 top-0.5 h-2 w-2 rounded-full border border-background",
+            "h-2 w-2 shrink-0 rounded-full",
             running ? "bg-emerald-400" : "bg-muted-foreground/70",
           )}
         />
       </button>
 
       {open && (
-        <div className="fade-in absolute bottom-0 left-[54px] z-50 w-64 rounded-xl border bg-popover p-2 text-popover-foreground shadow-[0_16px_40px_-12px_rgba(0,0,0,0.7)]">
+        <div className="fade-in absolute bottom-full left-0 z-50 mb-2 w-64 rounded-xl border bg-popover p-2 text-popover-foreground shadow-[0_16px_40px_-12px_rgba(0,0,0,0.7)]">
           <div className="flex items-center gap-3 px-2 py-2">
             <Avatar url={profile.avatar_url} name={name} className="h-10 w-10 text-sm" />
             <div className="min-w-0">

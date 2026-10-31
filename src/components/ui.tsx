@@ -21,7 +21,8 @@ type ButtonSize = "sm" | "md" | "icon";
 const buttonVariants: Record<ButtonVariant, string> = {
   default:
     "bg-primary text-primary-foreground shadow-[inset_0_1px_0_rgba(255,255,255,0.25),0_3px_8px_-3px_hsl(var(--primary)/0.35)] hover:brightness-110",
-  secondary: "bg-secondary text-secondary-foreground hover:bg-secondary/80",
+  secondary:
+    "bg-secondary text-secondary-foreground hover:bg-secondary/80",
   outline:
     "border border-border bg-transparent text-foreground hover:bg-accent hover:text-accent-foreground",
   ghost: "text-muted-foreground hover:bg-accent hover:text-accent-foreground",
@@ -73,17 +74,24 @@ export function Select({
 }: SelectHTMLAttributes<HTMLSelectElement>) {
   return (
     <div className="relative">
-      <select className={cx("ui-input appearance-none pr-9", className)} {...props}>
+      <select
+        className={cx("ui-input appearance-none pr-9", className)}
+        {...props}
+      >
         {children}
       </select>
-      <ChevronDownIcon className="pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+      <ChevronDownIcon
+        className="pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground"
+      />
     </div>
   );
 }
 
 export function Card({ className, children }: { className?: string; children: ReactNode }) {
   return (
-    <section className={cx("ui-card rounded-xl border bg-card text-card-foreground", className)}>
+    <section
+      className={cx("ui-card rounded-xl border bg-card text-card-foreground", className)}
+    >
       {children}
     </section>
   );
@@ -137,7 +145,7 @@ export function Avatar({
   return (
     <div
       className={cx(
-        "flex shrink-0 items-center justify-center rounded-full bg-primary/15 font-semibold text-primary",
+        "flex shrink-0 items-center justify-rounded-full bg-primary/15 font-semibold text-primary",
         className,
       )}
     >
@@ -168,7 +176,9 @@ export function Switch({
       <span className="min-w-0">
         <span className="block text-sm font-medium">{label}</span>
         {description && (
-          <span className="mt-0.5 block text-xs text-muted-foreground">{description}</span>
+          <span className="mt-0.5 block text-xs text-muted-foreground">
+            {description}
+          </span>
         )}
       </span>
       <span
@@ -227,4 +237,4 @@ export function Callout({
       {children}
     </div>
   );
-}
+}

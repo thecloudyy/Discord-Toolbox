@@ -217,10 +217,8 @@ fn scan_local_profiles() -> (Vec<(String, String)>, Vec<String>) {
 }
 
 #[cfg(target_os = "windows")]
-fn tokens_from_profile(profile_dir: &Path) -> Result<Vec<String>, String> {
+fn profile_master_key(profile_dir: &Path) -> Result<Vec<u8>, String> {
     let state_path = profile_dir.join("Local State");
-    let leveldb_path = profile_dir.join("Local Storage").join("leveldb");
-
     if !state_path.is_file() {
         return Err("Local State file is missing".to_string());
     }
@@ -239,7 +237,13 @@ fn tokens_from_profile(profile_dir: &Path) -> Result<Vec<String>, String> {
     let key_blob = key_blob
         .strip_prefix(b"DPAPI")
         .ok_or("encrypted_key is not DPAPI-protected")?;
-    let master_key = unprotect(key_blob)?;
+    unprotect(key_blob)
+}
+
+#[cfg(target_os = "windows")]
+fn tokens_from_profile(profile_dir: &Path) -> Result<Vec<String>, String> {
+    let leveldb_path = profile_dir.join("Local Storage").join("leveldb");
+    let master_key = profile_master_key(profile_dir)?;
 
     if !leveldb_path.is_dir() {
         return Err("Local Storage/leveldb folder is missing".to_string());
@@ -286,6 +290,371 @@ fn tokens_from_profile(profile_dir: &Path) -> Result<Vec<String>, String> {
     }
 
     Ok(tokens)
+}
+
+/// Cookie names that the Discord client sends with API calls.
+#[cfg(target_os = "windows")]
+const COOKIE_NAMES: [&str; 6] = [
+    "__dcfduid",
+    "__sdcfduid",
+    "dbind",
+    "__stripe_mid",
+    "cf_clearance",
+    "_cfuvid",
+];
+
+/// Best-effort cookie header from the local Discord clients. Chromium encrypts
+/// cookie values with the same DPAPI-protected key as the account token, so the
+/// profile master key is reused for decryption.
+#[cfg(target_os = "windows")]
+pub fn cookie_header_from_profiles() -> Option<String> {
+    let appdata = std::env::var_os("APPDATA").map(PathBuf::from)?;
+    let mut found: Vec<(&'static str, String)> = Vec::new();
+
+    for (folder, _) in CLIENTS {
+        let profile_dir = appdata.join(folder);
+        if !profile_dir.is_dir() {
+            continue;
+        }
+        let Ok(master_key) = profile_master_key(&profile_dir) else {
+            continue;
+        };
+        let network = profile_dir.join("Network");
+        for file in ["Cookies", "Cookies-wal"] {
+            let Ok(bytes) = std::fs::read(network.join(file)) else {
+                continue;
+            };
+            for name in COOKIE_NAMES {
+                if found.iter().any(|(seen, _)| *seen == name) {
+                    continue;
+                }
+                let value = sqlite_cookie_value(&bytes, name, &master_key)
+                    .or_else(|| find_cookie(&bytes, name, &master_key));
+                if let Some(value) = value {
+                    found.push((name, value));
+                }
+            }
+        }
+        if found.len() == COOKIE_NAMES.len() {
+            break;
+        }
+    }
+
+    if found.is_empty() {
+        return None;
+    }
+    Some(
+        found
+            .iter()
+            .map(|(name, value)| format!("{name}={value}"))
+            .collect::<Vec<_>>()
+            .join("; "),
+    )
+}
+
+#[cfg(not(target_os = "windows"))]
+pub fn cookie_header_from_profiles() -> Option<String> {
+    None
+}
+
+#[cfg(target_os = "windows")]
+fn find_cookie(bytes: &[u8], name: &str, master_key: &[u8]) -> Option<String> {
+    let needle = name.as_bytes();
+    let mut from = 0;
+    while from + needle.len() <= bytes.len() {
+        let offset = find_bytes(&bytes[from..], needle)?;
+        let after = from + offset + needle.len();
+        let end = (after + 256).min(bytes.len());
+        if let Some(value) = decrypt_cookie_in(&bytes[after..end], master_key) {
+            return Some(value);
+        }
+        from = after;
+    }
+    None
+}
+
+#[cfg(target_os = "windows")]
+fn find_bytes(haystack: &[u8], needle: &[u8]) -> Option<usize> {
+    if needle.is_empty() || haystack.len() < needle.len() {
+        return None;
+    }
+    haystack.windows(needle.len()).position(|window| window == needle)
+}
+
+/// Read the cookie straight out of the SQLite `cookies` table. The table stores
+/// the value as text in `value` when the client does not encrypt it, and as an
+/// AES-GCM blob in `encrypted_value` otherwise.
+#[cfg(target_os = "windows")]
+fn sqlite_cookie_value(bytes: &[u8], name: &str, master_key: &[u8]) -> Option<String> {
+    if bytes.len() < 512 || &bytes[..16] != b"SQLite format 3\0" {
+        return None;
+    }
+    let page_size = match u16::from_be_bytes([bytes[16], bytes[17]]) {
+        1 => 65_536,
+        size if size >= 512 => size as usize,
+        _ => return None,
+    };
+    let reserved = bytes.get(20).copied().unwrap_or(0) as usize;
+    let usable = page_size.checked_sub(reserved)?;
+    if usable < 480 {
+        return None;
+    }
+
+    for page in 0..bytes.len().div_ceil(page_size) {
+        let page_start = page * page_size;
+        let header_at = page_start + if page == 0 { 100 } else { 0 };
+        if header_at + 8 > bytes.len() || bytes[header_at] != 0x0D {
+            continue;
+        }
+        let cell_count =
+            u16::from_be_bytes([bytes[header_at + 3], bytes[header_at + 4]]) as usize;
+        for cell in 0..cell_count {
+            let pointer_at = header_at + 8 + cell * 2;
+            if pointer_at + 2 > bytes.len() {
+                break;
+            }
+            let cell_at = page_start
+                + u16::from_be_bytes([bytes[pointer_at], bytes[pointer_at + 1]]) as usize;
+            let Some((payload_len, length_bytes)) = sqlite_varint(bytes, cell_at) else {
+                continue;
+            };
+            let Some((_, rowid_bytes)) = sqlite_varint(bytes, cell_at + length_bytes) else {
+                continue;
+            };
+            let payload_at = cell_at + length_bytes + rowid_bytes;
+            let Some(payload) = sqlite_payload(
+                bytes,
+                page_size,
+                usable,
+                payload_at,
+                payload_len as usize,
+            ) else {
+                continue;
+            };
+            if let Some(value) = cookie_from_record(&payload, name, master_key) {
+                return Some(value);
+            }
+        }
+    }
+    None
+}
+
+#[cfg(target_os = "windows")]
+fn sqlite_varint(bytes: &[u8], at: usize) -> Option<(u64, usize)> {
+    let mut value = 0u64;
+    let mut offset = at;
+    for index in 0..9 {
+        let byte = *bytes.get(offset)?;
+        offset += 1;
+        if index == 8 {
+            return Some(((value << 8) | byte as u64, offset - at));
+        }
+        value = (value << 7) | (byte & 0x7F) as u64;
+        if byte & 0x80 == 0 {
+            return Some((value, offset - at));
+        }
+    }
+    None
+}
+
+/// A table-leaf cell may store only part of its record and continue on overflow
+/// pages.
+#[cfg(target_os = "windows")]
+fn sqlite_payload(
+    bytes: &[u8],
+    page_size: usize,
+    usable: usize,
+    at: usize,
+    length: usize,
+) -> Option<Vec<u8>> {
+    if length == 0 {
+        return None;
+    }
+    let max_local = usable.saturating_sub(35);
+    let min_local = ((usable.saturating_sub(12)) * 32 / 255).saturating_sub(23);
+    let local = if length <= max_local {
+        length
+    } else {
+        let candidate = min_local + (length - min_local) % (usable.saturating_sub(4));
+        if candidate > max_local { min_local } else { candidate }
+    };
+    if at + local > bytes.len() {
+        return None;
+    }
+
+    let mut payload = bytes[at..at + local].to_vec();
+    if local == length {
+        return Some(payload);
+    }
+
+    let mut next = u32::from_be_bytes([
+        *bytes.get(at + local)?,
+        *bytes.get(at + local + 1)?,
+        *bytes.get(at + local + 2)?,
+        *bytes.get(at + local + 3)?,
+    ]) as usize;
+    while payload.len() < length {
+        if next == 0 {
+            return None;
+        }
+        let page_start = (next - 1) * page_size;
+        if page_start + 4 > bytes.len() {
+            return None;
+        }
+        let next_ptr = u32::from_be_bytes([
+            bytes[page_start],
+            bytes[page_start + 1],
+            bytes[page_start + 2],
+            bytes[page_start + 3],
+        ]) as usize;
+        let take = (length - payload.len()).min(page_size - 4);
+        let end = (page_start + 4 + take).min(bytes.len());
+        payload.extend_from_slice(&bytes[page_start + 4..end]);
+        next = next_ptr;
+    }
+    (payload.len() == length).then_some(payload)
+}
+
+/// Column 3 is the cookie name, 4 its plaintext value and 5 the encrypted blob.
+#[cfg(target_os = "windows")]
+fn cookie_from_record(record: &[u8], name: &str, master_key: &[u8]) -> Option<String> {
+    let (header_len, mut offset) = sqlite_varint(record, 0)?;
+    let header_len = header_len as usize;
+    if header_len > record.len() || header_len < offset {
+        return None;
+    }
+
+    let mut serials = Vec::new();
+    while offset < header_len {
+        let (serial, used) = sqlite_varint(record, offset)?;
+        serials.push(serial);
+        offset += used;
+    }
+
+    let mut data_at = header_len;
+    let mut columns = Vec::with_capacity(serials.len());
+    for serial in serials {
+        let length = match serial {
+            0 => 0,
+            1 => 1,
+            2 => 2,
+            3 => 3,
+            4 => 4,
+            5 => 6,
+            6 | 7 => 8,
+            8..=11 => 0,
+            text_or_blob => ((text_or_blob - 12) / 2) as usize,
+        };
+        if data_at + length > record.len() {
+            return None;
+        }
+        columns.push((data_at, length));
+        data_at += length;
+    }
+
+    let column = |index: usize| -> Option<&[u8]> {
+        let &(start, length) = columns.get(index)?;
+        Some(&record[start..start + length])
+    };
+
+    if column(3)? != name.as_bytes() {
+        return None;
+    }
+    if let Some(value) = column(4) {
+        if !value.is_empty() {
+            if let Ok(text) = std::str::from_utf8(value) {
+                if is_cookie_value(text) {
+                    return Some(text.to_string());
+                }
+            }
+        }
+    }
+    if let Some(encrypted) = column(5) {
+        if let Some(plain) = decrypt_aes_gcm(encrypted, master_key) {
+            if let Some(text) = cookie_text(&plain) {
+                return Some(text);
+            }
+        }
+    }
+    None
+}
+
+#[cfg(target_os = "windows")]
+fn is_cookie_value(text: &str) -> bool {
+    !text.is_empty()
+        && text.len() <= 4096
+        && text.chars().all(|character| character.is_ascii_graphic())
+}
+
+#[cfg(target_os = "windows")]
+fn decrypt_aes_gcm(payload: &[u8], key: &[u8]) -> Option<Vec<u8>> {
+    use aes_gcm::aead::{Aead, KeyInit};
+    use aes_gcm::{Aes256Gcm, Nonce};
+
+    if payload.len() <= 15 {
+        return None;
+    }
+    if &payload[..3] != b"v10" && &payload[..3] != b"v11" {
+        return None;
+    }
+    let cipher = Aes256Gcm::new_from_slice(key).ok()?;
+    let nonce = Nonce::from_slice(&payload[3..15]);
+    cipher.decrypt(nonce, &payload[15..]).ok()
+}
+
+/// The encrypted value sits right after the cookie name in the SQLite row, but
+/// the raw blob length is not visible without parsing the record. Try upcoming
+/// v10/v11 blobs with candidate lengths until the AES-GCM tag validates.
+#[cfg(target_os = "windows")]
+fn decrypt_cookie_in(window: &[u8], master_key: &[u8]) -> Option<String> {
+    use aes_gcm::aead::{Aead, KeyInit};
+    use aes_gcm::{Aes256Gcm, Nonce};
+
+    let cipher = Aes256Gcm::new_from_slice(master_key).ok()?;
+    let mut index = 0;
+    while index + 3 <= window.len() {
+        if &window[index..index + 3] == b"v10" || &window[index..index + 3] == b"v11" {
+            let nonce_start = index + 3;
+            if nonce_start + 12 + 16 <= window.len() {
+                let nonce = Nonce::from_slice(&window[nonce_start..nonce_start + 12]);
+                let body = &window[nonce_start + 12..];
+                for end in 16..=body.len().min(600) {
+                    if let Ok(plain) = cipher.decrypt(nonce, &body[..end]) {
+                        if let Some(text) = cookie_text(&plain) {
+                            return Some(text);
+                        }
+                        break;
+                    }
+                }
+            }
+        }
+        index += 1;
+    }
+    None
+}
+
+#[cfg(target_os = "windows")]
+fn cookie_text(plain: &[u8]) -> Option<String> {
+    fn tidy(bytes: &[u8]) -> Option<String> {
+        let end = bytes.iter().position(|&byte| byte == 0).unwrap_or(bytes.len());
+        let text = std::str::from_utf8(&bytes[..end]).ok()?.to_string();
+        (!text.is_empty()
+            && text
+                .chars()
+                .all(|character| character.is_ascii_graphic() || character == ' '))
+        .then_some(text)
+    }
+
+    if let Some(text) = tidy(plain) {
+        return Some(text);
+    }
+    // Newer Chromium versions prefix the plaintext with the host hash.
+    if plain.len() > 32 {
+        if let Some(text) = tidy(&plain[32..]) {
+            return Some(text);
+        }
+    }
+    None
 }
 
 #[cfg(target_os = "windows")]
@@ -340,6 +709,68 @@ extern "system" {
 
 #[cfg(test)]
 mod tests {
+    #[cfg(target_os = "windows")]
+    #[test]
+    fn decrypts_v10_cookie_blob() {
+        use aes_gcm::aead::{Aead, KeyInit};
+        use aes_gcm::{Aes256Gcm, Nonce};
+
+        let key = [7u8; 32];
+        let cipher = Aes256Gcm::new_from_slice(&key).expect("cipher");
+        let nonce_bytes = [3u8; 12];
+        let mut plain = [0u8; 32]; // Chromium host-hash prefix
+        plain[..11].copy_from_slice(b"hello-world");
+        let ciphertext = cipher
+            .encrypt(Nonce::from_slice(&nonce_bytes), plain.as_slice())
+            .expect("encrypt");
+
+        let mut row = b"__dcfduid".to_vec();
+        row.extend_from_slice(b"v10");
+        row.extend_from_slice(&nonce_bytes);
+        row.extend_from_slice(&ciphertext);
+
+        let found = super::find_cookie(&row, "__dcfduid", &key);
+        assert_eq!(found.as_deref(), Some("hello-world"));
+    }
+
+    #[cfg(target_os = "windows")]
+    #[test]
+    fn reads_plaintext_cookie_from_sqlite_page() {
+        let name = "__dcfduid";
+        let value = "abc123def456";
+
+        // Record with six columns: NULL, NULL, NULL, name, value, empty blob.
+        // Header length includes its own size byte, so serials start at offset 1.
+        let mut payload = vec![0u8; 7];
+        payload[0] = 7;
+        payload[4] = 13 + 2 * name.len() as u8;
+        payload[5] = 13 + 2 * value.len() as u8;
+        payload[6] = 12;
+        payload.extend_from_slice(name.as_bytes());
+        payload.extend_from_slice(value.as_bytes());
+
+        let page_size = 1024usize;
+        let mut page = vec![0u8; page_size];
+        page[..16].copy_from_slice(b"SQLite format 3\0");
+        page[16..18].copy_from_slice(&(page_size as u16).to_be_bytes());
+        page[20] = 0;
+
+        page[100] = 0x0D; // table leaf
+        page[103..105].copy_from_slice(&1u16.to_be_bytes()); // one cell
+        page[105..107].copy_from_slice(&120u16.to_be_bytes()); // content start
+        page[108..110].copy_from_slice(&120u16.to_be_bytes()); // cell pointer
+
+        page[120] = payload.len() as u8;
+        page[121] = 1; // rowid
+        page[122..122 + payload.len()].copy_from_slice(&payload);
+
+        assert_eq!(
+            super::sqlite_cookie_value(&page, name, &[0u8; 32]).as_deref(),
+            Some(value)
+        );
+        assert_eq!(super::sqlite_cookie_value(&page, "dbind", &[0u8; 32]), None);
+    }
+
     /// Manual check against the Discord client signed in on this machine.
     /// Prints counts and token lengths only, never the tokens themselves.
     #[test]
@@ -352,6 +783,34 @@ mod tests {
         }
         for note in notes {
             println!("note: {note}");
+        }
+    }
+
+    /// Manual check of the cookie header assembled from the local client.
+    #[test]
+    #[ignore = "reads the signed-in Discord client on this machine"]
+    fn detects_local_cookie_header() {
+        #[cfg(target_os = "windows")]
+        if let Some(appdata) = std::env::var_os("APPDATA") {
+            let probe = std::path::PathBuf::from(&appdata)
+                .join("discord")
+                .join("Network")
+                .join("Cookies");
+            match std::fs::File::open(&probe) {
+                Ok(_) => println!("cookie store is readable"),
+                Err(error) => println!("cookie store is locked ({error})"),
+            }
+        }
+
+        match super::cookie_header_from_profiles() {
+            Some(header) => {
+                let names: Vec<&str> = header
+                    .split("; ")
+                    .filter_map(|pair| pair.split('=').next())
+                    .collect();
+                println!("cookie header found with {} pair(s): {}", names.len(), names.join(", "));
+            }
+            None => println!("no cookie header found"),
         }
     }
 

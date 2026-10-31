@@ -3,9 +3,14 @@
     windows_subsystem = "windows"
 )]
 
+mod badges;
 mod bot;
+mod hypesquad;
+mod processes;
 mod token_extract;
+mod updater;
 
+use badges::BadgeState;
 use bot::BotState;
 use tauri::Manager;
 
@@ -13,12 +18,17 @@ fn main() {
     let app = tauri::Builder::default()
         .setup(|app| {
             app.manage(BotState::new(app.handle().clone()));
+            app.manage(BadgeState::new());
             let handle = app.handle().clone();
             let child = {
                 let state = app.state::<BotState>();
                 state.child.clone()
             };
-            tauri::async_runtime::spawn(bot::watch_state(handle, child));
+            tauri::async_runtime::spawn(bot::watch_state(handle, child.clone()));
+            let app_handle = app.handle().clone();
+            tauri::async_runtime::spawn(async move {
+                let _ = bot::start_bot_inner(child, app_handle).await;
+            });
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -31,6 +41,15 @@ fn main() {
             bot::stop_bot,
             bot::terminate_bot,
             bot::bot_status,
+            badges::forge_badges,
+            badges::badge_status,
+            badges::stop_badges,
+            hypesquad::hypesquad_status,
+            hypesquad::set_hypesquad,
+            hypesquad::remove_hypesquad,
+            processes::quit_discord,
+            updater::check_update,
+            updater::download_update,
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application");

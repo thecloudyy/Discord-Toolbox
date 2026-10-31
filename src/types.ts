@@ -22,4 +22,46 @@ export type BotStatus = {
   updated_at?: number | null;
 };
 
-export type Tab = "home" | "settings" | "logs";
+export type Tab = "home" | "settings" | "badges" | "hypesquad" | "logs";
+
+export type ProfileBadge = {
+  id: string;
+  description: string;
+  icon_url?: string | null;
+};
+
+export type HypeSquadHouse = "bravery" | "brilliance" | "balance";
+
+export type HypeSquadStatus = {
+  user_id: string;
+  username: string;
+  display_name: string;
+  avatar_url?: string | null;
+  house?: HypeSquadHouse | null;
+  flags: number;
+  badges: ProfileBadge[];
+};
+
+export type BadgeRunState = {
+  running: boolean;
+  games?: number;
+  hours?: number;
+  username?: string | null;
+  error?: string | null;
+};
+
+export type UpdateInfo = {
+  available: boolean;
+  current: string;
+  version?: string | null;
+  url?: string | null;
+  asset_name?: string | null;
+  asset_size?: number | null;
+};
+
+export type UpdateProgress = {
+  phase: "downloading" | "installing";
+  received: number;
+  total?: number | null;
+  percent: number;
+};

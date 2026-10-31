@@ -52,6 +52,17 @@ export function TerminalIcon(props: SVGProps<SVGSVGElement>) {
   );
 }
 
+export function MedalIcon(props: SVGProps<SVGSVGElement>) {
+  return (
+    <Icon {...props}>
+      <path d="M8.5 12.5 5.5 3h4l2.5 5.5" />
+      <path d="M15.5 12.5 18.5 3h-4L12 8.5" />
+      <circle cx="12" cy="16" r="5" />
+      <path d="m12 13.8.8 1.6 1.8.3-1.3 1.3.3 1.8-1.6-.9-1.6.9.3-1.8-1.3-1.3 1.8-.3.8-1.6Z" />
+    </Icon>
+  );
+}
+
 export function PlayIcon(props: SVGProps<SVGSVGElement>) {
   return (
     <Icon {...props}>
@@ -185,6 +196,26 @@ export function RefreshIcon(props: SVGProps<SVGSVGElement>) {
   );
 }
 
+export function ArrowUpCircleIcon(props: SVGProps<SVGSVGElement>) {
+  return (
+    <Icon {...props}>
+      <circle cx="12" cy="12" r="9" />
+      <path d="m8.5 12.5 3.5-3.5 3.5 3.5" />
+      <path d="M12 9v7" />
+    </Icon>
+  );
+}
+
+export function DownloadIcon(props: SVGProps<SVGSVGElement>) {
+  return (
+    <Icon {...props}>
+      <path d="M12 4v11" />
+      <path d="m7.5 10.5 4.5 4.5 4.5-4.5" />
+      <path d="M5 19.5h14" />
+    </Icon>
+  );
+}
+
 export function HashIcon(props: SVGProps<SVGSVGElement>) {
   return (
     <Icon {...props}>
@@ -199,18 +230,6 @@ export function ServerIcon(props: SVGProps<SVGSVGElement>) {
       <rect x="3" y="4" width="18" height="7" rx="2" />
       <rect x="3" y="13" width="18" height="7" rx="2" />
       <path d="M7 7.5h.01M7 16.5h.01" />
-    </Icon>
-  );
-}
-
-export function HeadphonesOffIcon(props: SVGProps<SVGSVGElement>) {
-  return (
-    <Icon {...props}>
-      <path d="M4 14v-2a8 8 0 0 1 12.8-6.4" />
-      <path d="M20 14v-2c0-1.6-.5-3.1-1.3-4.4" />
-      <path d="M4 14h2a1 1 0 0 1 1 1v4a1 1 0 0 1-1 1H4a2 2 0 0 1-2-2v-2a2 2 0 0 1 2-2Z" />
-      <path d="M20 14h-2a1 1 0 0 0-1 1v4a1 1 0 0 0 1 1h2a2 2 0 0 0 2-2v-2a2 2 0 0 0-2-2Z" />
-      <path d="m3 3 18 18" />
     </Icon>
   );
 }
@@ -235,29 +254,19 @@ export function TrashIcon(props: SVGProps<SVGSVGElement>) {
   );
 }
 
+export function CheckIcon(props: SVGProps<SVGSVGElement>) {
+  return (
+    <Icon {...props}>
+      <path d="m5 12.5 4.5 4.5L19 7" />
+    </Icon>
+  );
+}
+
 export function UserIcon(props: SVGProps<SVGSVGElement>) {
   return (
     <Icon {...props}>
       <circle cx="12" cy="8" r="3.4" />
       <path d="M4.5 20a7.5 7.5 0 0 1 15 0" />
-    </Icon>
-  );
-}
-
-export function RadioIcon(props: SVGProps<SVGSVGElement>) {
-  return (
-    <Icon {...props}>
-      <circle cx="12" cy="12" r="2" />
-      <path d="M7.8 7.8a6 6 0 0 0 0 8.4M16.2 16.2a6 6 0 0 0 0-8.4" />
-      <path d="M4.9 4.9a10 10 0 0 0 0 14.2M19.1 19.1a10 10 0 0 0 0-14.2" />
-    </Icon>
-  );
-}
-
-export function CheckIcon(props: SVGProps<SVGSVGElement>) {
-  return (
-    <Icon {...props}>
-      <path d="m5 12.5 4.5 4.5L19 7" />
     </Icon>
   );
 }

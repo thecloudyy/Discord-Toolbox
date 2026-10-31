@@ -106,8 +106,8 @@ export function LoginPanel({
               </Button>
               {message && <span className="text-xs text-destructive">{message}</span>}
             </div>
-          </>
-        ) : (
+          </>)
+          : (
           <div className="space-y-5 p-6">
             <div>
               <h3 className="font-semibold">Discord account</h3>
@@ -122,13 +122,11 @@ export function LoginPanel({
                 {detecting ? "Scanning…" : "Auto Detect Token"}
               </Button>
               <Button variant="outline" onClick={() => setManualOpen((value) => !value)}>
-                <KeyIcon />
-                Manual Input
+                <KeyIcon /> Manual Input
               </Button>
               {tokens.length > 0 && (
                 <Button variant="ghost" onClick={() => setShowMethods(false)}>
-                  <UserIcon />
-                  {tokens.length} detected
+                  <UserIcon /> {tokens.length} detected
                 </Button>
               )}
             </div>
@@ -164,8 +162,7 @@ export function LoginPanel({
 
             {detecting && (
               <p className="flex items-center gap-2 text-sm text-muted-foreground">
-                <LoaderIcon />
-                Reading local Discord profiles…
+                <LoaderIcon /> Reading local Discord profiles…
               </p>
             )}
 
@@ -193,4 +190,4 @@ export function LoginPanel({
       </p>
     </section>
   );
-}
+}

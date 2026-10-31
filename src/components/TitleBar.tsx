@@ -72,7 +72,7 @@ export function TitleBar() {
   }
 
   return (
-    <header className="flex h-12 w-full shrink-0 select-none items-center border-b border-border/40 bg-background">
+    <header className="flex h-12 w-full shrink-0 select-none border-b border-border/40 bg-background">
       <div
         className="flex h-full w-14 shrink-0 items-center justify-center"
         onMouseDown={handleDrag}
@@ -88,7 +88,9 @@ export function TitleBar() {
         className="flex h-full min-w-0 flex-1 items-center gap-2"
         onMouseDown={handleDrag}
       >
-        <span className="truncate text-xs font-medium text-foreground/90">Discord Keep-Alive</span>
+        <span className="truncate text-xs font-medium text-foreground/90">
+          Discord Toolbox
+        </span>
         <span className="rounded-full border border-border/70 bg-muted/40 px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground">
           v{version}
         </span>
@@ -127,4 +129,4 @@ export function TitleBar() {
       </div>
     </header>
   );
-}
+}

@@ -1,12 +1,14 @@
 import type { ComponentType, SVGProps } from "react";
 import type { Profile, Tab } from "../types";
 import { AccountMenu } from "./AccountMenu";
-import { HomeIcon, LogInIcon, SlidersIcon, TerminalIcon } from "./icons";
+import { HomeIcon, LogInIcon, MedalIcon, SlidersIcon, SparklesIcon, TerminalIcon } from "./icons";
 import { cx } from "../lib/utils";
 
 const items: Array<{ key: Tab; label: string; icon: ComponentType<SVGProps<SVGSVGElement>> }> = [
-  { key: "home", label: "Dashboard", icon: HomeIcon },
+  { key: "home", label: "Keep alive", icon: HomeIcon },
   { key: "settings", label: "Presence and platform", icon: SlidersIcon },
+  { key: "badges", label: "Badge forger", icon: MedalIcon },
+  { key: "hypesquad", label: "HypeSquad", icon: SparklesIcon },
   { key: "logs", label: "Live log", icon: TerminalIcon },
 ];
 
@@ -25,10 +27,10 @@ export function AppRail({
 }) {
   return (
     <nav
-      className="flex w-14 shrink-0 flex-col items-center gap-3 px-1 pb-2 pt-1"
+      className="flex w-52 shrink-0 flex-col gap-3 px-2 pb-2 pt-1"
       aria-label="Primary"
     >
-      <div className="flex w-full flex-1 flex-col items-center gap-1">
+      <div className="flex w-full flex-1 flex-col gap-1">
         {items.map((item) => {
           const Icon = item.icon;
           const active = tab === item.key;
@@ -36,13 +38,17 @@ export function AppRail({
             <button
               key={item.key}
               type="button"
-              className={cx("rail-button", active && "rail-button-active")}
+              className={cx(
+                "rail-button",
+                active && "rail-button-active",
+              )}
               title={item.label}
               aria-label={item.label}
               aria-current={active ? "page" : undefined}
               onClick={() => onTab(item.key)}
             >
               <Icon />
+              <span className="truncate text-[13px] font-medium">{item.label}</span>
             </button>
           );
         })}
@@ -52,7 +58,11 @@ export function AppRail({
 
       <div className="pb-1">
         {profile ? (
-          <AccountMenu profile={profile} running={running} onSwitchAccount={onSwitchAccount} />
+          <AccountMenu
+            profile={profile}
+            running={running}
+            onSwitchAccount={onSwitchAccount}
+          />
         ) : (
           <button
             type="button"
@@ -62,9 +72,10 @@ export function AppRail({
             onClick={() => onTab("home")}
           >
             <LogInIcon />
+            <span className="truncate text-[13px] font-medium">Sign in</span>
           </button>
         )}
       </div>
     </nav>
   );
-}
+}

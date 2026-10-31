@@ -31,7 +31,7 @@ impl BotState {
 
 /// Repository root: the checkout in debug builds, and the nearest ancestor of
 /// the executable that has a pyproject.toml in release builds.
-fn project_root() -> PathBuf {
+pub(crate) fn project_root() -> PathBuf {
     if cfg!(debug_assertions) {
         if let Some(dir) = Path::new(env!("CARGO_MANIFEST_DIR")).parent() {
             return dir.to_path_buf();
@@ -48,12 +48,38 @@ fn project_root() -> PathBuf {
     start
 }
 
+/// Writable directory for `.env` and runtime state. Installed builds may live
+/// under Program Files, which a normal user cannot write to, so those fall back
+/// to `%LOCALAPPDATA%\Discord Toolbox`.
+pub(crate) fn config_dir() -> PathBuf {
+    let root = project_root();
+    if is_writable(&root) {
+        return root;
+    }
+    let base = std::env::var_os("LOCALAPPDATA")
+        .map(PathBuf::from)
+        .or_else(|| std::env::var_os("APPDATA").map(PathBuf::from));
+    let Some(base) = base else {
+        return root;
+    };
+    let dir = base.join("Discord Toolbox");
+    let _ = std::fs::create_dir_all(&dir);
+    dir
+}
+
+fn is_writable(dir: &Path) -> bool {
+    let probe = dir.join(".write-test");
+    let writable = std::fs::File::create(&probe).is_ok();
+    let _ = std::fs::remove_file(&probe);
+    writable
+}
+
 fn env_path() -> PathBuf {
-    project_root().join(".env")
+    config_dir().join(".env")
 }
 
 fn state_path() -> PathBuf {
-    project_root().join(".vc-keeper.state.json")
+    config_dir().join(".vc-keeper.state.json")
 }
 
 fn venv_python(root: &Path) -> PathBuf {
@@ -71,6 +97,34 @@ fn venv_python(root: &Path) -> PathBuf {
     PathBuf::from("python")
 }
 
+/// Locate the standalone, self-contained bot executable (built with PyInstaller).
+/// Returns None if not found, in which case the caller falls back to `python -m vc_keeper.app`.
+fn bot_exe(root: &Path) -> Option<PathBuf> {
+    // Next to the Tauri executable (release bundles place resources alongside the exe).
+    if let Ok(exe) = std::env::current_exe() {
+        if let Some(parent) = exe.parent() {
+            let candidate = if cfg!(windows) {
+                parent.join("vc-keeper-bot.exe")
+            } else {
+                parent.join("vc-keeper-bot")
+            };
+            if candidate.is_file() {
+                return Some(candidate);
+            }
+        }
+    }
+    // Next to the project root's dist/ directory (dev builds).
+    let candidate = if cfg!(windows) {
+        root.join("dist").join("vc-keeper-bot.exe")
+    } else {
+        root.join("dist").join("vc-keeper-bot")
+    };
+    if candidate.is_file() {
+        return Some(candidate);
+    }
+    None
+}
+
 fn python_command(root: &Path) -> Command {
     let mut cmd = Command::new(venv_python(root));
     cmd.current_dir(root)
@@ -82,6 +136,25 @@ fn python_command(root: &Path) -> Command {
     #[cfg(windows)]
     cmd.creation_flags(CREATE_NO_WINDOW);
     cmd
+}
+
+/// Build the command to start the bot. Uses the standalone PyInstaller bundle if
+/// available (no Python required on the user's machine), otherwise falls back to
+/// `python -m vc_keeper.app` from the venv.
+fn bot_command(root: &Path) -> Command {
+    if let Some(exe) = bot_exe(root) {
+        let mut cmd = Command::new(exe);
+        cmd.current_dir(config_dir())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped());
+        #[cfg(windows)]
+        cmd.creation_flags(CREATE_NO_WINDOW);
+        cmd
+    } else {
+        let mut cmd = python_command(root);
+        cmd.args(["-m", "vc_keeper.app"]);
+        cmd
+    }
 }
 
 // ------------------------------------------------------------------ commands
@@ -149,32 +222,41 @@ pub async fn write_env_multi(entries: HashMap<String, String>) -> Result<(), Str
 }
 
 /// Spawn the Python voice keeper and stream its output to the UI.
-#[tauri::command]
-pub async fn start_bot(state: State<'_, BotState>) -> Result<(), String> {
-    let mut guard = state.child.lock().await;
-    if let Some(child) = guard.as_mut() {
-        if child.try_wait().ok().flatten().is_none() {
+///
+/// Extracted so it can be called both from the Tauri command and from
+/// `main.rs` setup for auto-start-on-launch.
+pub async fn start_bot_inner(
+    child: Arc<Mutex<Option<Child>>>,
+    app: AppHandle,
+) -> Result<(), String> {
+    let mut guard = child.lock().await;
+    if let Some(c) = guard.as_mut() {
+        if c.try_wait().ok().flatten().is_none() {
             return Ok(());
         }
     }
 
     let root = project_root();
-    let mut cmd = python_command(&root);
-    cmd.args(["-m", "vc_keeper.app"]);
+    let mut cmd = bot_command(&root);
 
     let mut child = cmd.spawn().map_err(|e| format!("failed to start the bot: {e}"))?;
     let pid = child.id();
     if let Some(stdout) = child.stdout.take() {
-        stream_lines(stdout, "", state.app.clone());
+        stream_lines(stdout, "", app.clone());
     }
     if let Some(stderr) = child.stderr.take() {
-        stream_lines(stderr, "[stderr] ", state.app.clone());
+        stream_lines(stderr, "[stderr] ", app.clone());
     }
     *guard = Some(child);
     drop(guard);
 
-    let _ = state.app.emit("bot-state", json!({ "running": true, "pid": pid, "sessions": [] }));
+    let _ = app.emit("bot-state", json!({ "running": true, "pid": pid, "sessions": [] }));
     Ok(())
+}
+
+#[tauri::command]
+pub async fn start_bot(state: State<'_, BotState>) -> Result<(), String> {
+    start_bot_inner(state.child.clone(), state.app.clone()).await
 }
 
 /// Stop the bot gracefully, force-killing it if it does not exit in time.

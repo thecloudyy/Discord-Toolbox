@@ -1,4 +1,4 @@
-# Discord-Keep-Alive
+# Discord Toolbox
 
 Keeps your Discord account in a voice channel 24/7, online with optional custom status/activity.
 Built on discord.py-self. Automating a user account is against Discord's ToS: use at your own risk.
@@ -17,6 +17,9 @@ Built on discord.py-self. Automating a user account is against Discord's ToS: us
 - Most settings apply to the running bot immediately; token, `PLATFORM` and self-deafen need a restart
 - Token auto-detection from local Discord profiles (Windows)
 - Multi-account selection
+- Game badge forger: credits game time and game variety through Discord's own telemetry
+- HypeSquad manager: switch house, attempt removal, and view profile badges
+- Built-in updater fed by GitHub releases
 - Exit codes: 0 stopped, 1 crashed (auto-restarts), 78 bad config/token
 
 ## Disclaimer
@@ -28,7 +31,7 @@ By using this code, you are automating your Discord account. This is against Dis
 ## Requirements
 
 - Python 3.12+
-- Node.js 18+ with pnpm (desktop app)
+- Node.js 18+ and npm (desktop app)
 - Rust toolchain and the Tauri prerequisites (only needed to build the desktop app)
 
 ## Installation
@@ -46,11 +49,11 @@ By using this code, you are automating your Discord account. This is against Dis
 2. Install the desktop app dependencies and start it:
 
    ```
-   pnpm install
-   pnpm tauri:dev
+   npm install
+   npm run tauri:dev
    ```
 
-   Build an installer with `pnpm tauri:build` (output in `src-tauri/target/release/bundle`).
+   Build installers with `npm run tauri:build` (output in `src-tauri/target/release/bundle`).
 
 The app detects your Discord accounts automatically and stores the chosen token in `.env`.
 It spawns the Python engine as a child process, streams its log, and reads the live state it
@@ -125,21 +128,16 @@ src/vc_keeper/app.py            the bot: config, gateway identity, voice keeper,
 src/vc_keeper/envfile.py        shared .env reading/writing and app directory
 src/vc_keeper/token_detect.py   token discovery from local Discord profiles (Windows)
 src/vc_keeper/profile.py        profile lookup for the account picker
-src/App.tsx, src/AppBody.tsx    React dashboard (Vite + Tailwind)
+src/App.tsx, src/components/    React app (Vite + Tailwind)
 src-tauri/src/main.rs           Tauri entry point and window lifecycle
 src-tauri/src/bot.rs            Python process control, log streaming, live state bridge
+src-tauri/src/badges.rs         game badge forger
+src-tauri/src/hypesquad.rs      HypeSquad house manager
+src-tauri/src/updater.rs        GitHub release updater
 src-tauri/capabilities/         window permissions granted to the webview
 install.py, *.bat               source install and start helpers
 deploy/vc-keeper.service        systemd unit for source installs on Linux
 ```
-
-## Credits
-
-Inspired by:
-- tonyizdabezt/vc-keeper
-- wtfrj/Online-account-24-7
-- snipcola/Discord-Keep-Alive
-- Masterain98/discord-quest-helper (UI library & token detection)
 
 ## License
 

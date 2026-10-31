@@ -2,11 +2,15 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { AppRail } from "./components/AppRail";
+import { BadgesPage } from "./components/BadgesPage";
+import { ConfirmDialog } from "./components/ConfirmDialog";
 import { Dashboard } from "./components/Dashboard";
+import { HypeSquadPage } from "./components/HypeSquadPage";
 import { LoginPanel } from "./components/LoginPanel";
 import { LogsPage } from "./components/LogsPage";
 import { SettingsPage } from "./components/SettingsPage";
 import { TitleBar } from "./components/TitleBar";
+import { UpdateBanner } from "./components/UpdateBanner";
 import {
   buildPlatformIndicators,
   onlineSummaryOf,
@@ -14,6 +18,7 @@ import {
   spoofClientMap,
 } from "./lib/platform";
 import type {
+  BadgeRunState,
   BotStatus,
   Config,
   DetectedAccount,
@@ -21,6 +26,8 @@ import type {
   ScanReport,
   Session,
   Tab,
+  UpdateInfo,
+  UpdateProgress,
 } from "./types";
 
 export default function App() {
@@ -40,6 +47,14 @@ export default function App() {
   const [log, setLog] = useState("");
   const [live, setLive] = useState(false);
   const [msg, setMsg] = useState("");
+  const [badgeState, setBadgeState] = useState<BadgeRunState>({ running: false });
+  const [badgeLog, setBadgeLog] = useState("");
+  const [badgeMsg, setBadgeMsg] = useState("");
+  const [quitPrompt, setQuitPrompt] = useState<{ hours: number; games: number } | null>(null);
+  const [quitting, setQuitting] = useState(false);
+  const [update, setUpdate] = useState<UpdateInfo | null>(null);
+  const [updateProgress, setUpdateProgress] = useState<UpdateProgress | null>(null);
+  const [updateError, setUpdateError] = useState("");
   const logBoxRef = useRef<HTMLPreElement | null>(null);
 
   const setCfg = useCallback((next: Config) => {
@@ -93,70 +108,6 @@ export default function App() {
     setMsg("");
     setTab("home");
     await patchConfig({ DISCORD_TOKEN: account.token });
-  }
-
-  useEffect(() => {
-    let cancelled = false;
-    const unlisteners: Array<() => void> = [];
-
-    void listen<string>("bot-log", (event) => {
-      setLog((previous) =>
-        [...previous.split("\n").filter(Boolean), event.payload].slice(-500).join("\n"),
-      );
-    }).then((unlisten) => (cancelled ? unlisten() : unlisteners.push(unlisten)));
-
-    void listen<BotStatus>("bot-state", (event) => applyStatus(event.payload)).then((unlisten) =>
-      cancelled ? unlisten() : unlisteners.push(unlisten),
-    );
-
-    void (async () => {
-      const config = await invoke<Config>("app_config").catch(() => ({}) as Config);
-      if (cancelled) return;
-      setCfg(config);
-      setSelfDeaf((config.SELF_DEAF || "").toLowerCase() === "true");
-
-      const status = await invoke<BotStatus>("bot_status").catch(() => null);
-      if (status && !cancelled) applyStatus(status);
-
-      const savedToken = (config.DISCORD_TOKEN || "").trim();
-      if (savedToken) {
-        setAccountSelected(true);
-        try {
-          const me = await invoke<Profile>("account_profile", { token: savedToken });
-          if (!cancelled) {
-            setProfile(me);
-            setMsg("");
-          }
-        } catch (error) {
-          if (!cancelled) setMsg(`Saved token could not be verified: ${String(error)}`);
-        }
-      } else {
-        void scanTokens(true);
-      }
-    })();
-
-    return () => {
-      cancelled = true;
-      for (const unlisten of unlisteners) unlisten();
-    };
-    // Boot once; scanTokens/selectAccount read live state through refs.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [applyStatus, setCfg]);
-
-  useEffect(() => {
-    const box = logBoxRef.current;
-    if (box) box.scrollTop = box.scrollHeight;
-  }, [log]);
-
-  function changeTab(next: Tab) {
-    setTab(next);
-    setMsg("");
-  }
-
-  function fieldChanged(key: string, value: string) {
-    const next = { ...cfgRef.current, [key]: value };
-    cfgRef.current = next;
-    setCfgState(next);
   }
 
   async function useManualToken() {
@@ -231,6 +182,54 @@ export default function App() {
     setMsg("Bot terminated");
   }
 
+  async function forgeBadges(hours: number, games: number, allowPrompt = true) {
+    setBadgeLog("");
+    setBadgeMsg("");
+    try {
+      const token = (cfgRef.current.DISCORD_TOKEN || "").trim();
+      await invoke("forge_badges", { token, hours, games });
+    } catch (error) {
+      const text = String(error);
+      if (allowPrompt && text.startsWith("COOKIE_LOCKED:")) {
+        setQuitPrompt({ hours, games });
+        return;
+      }
+      setBadgeMsg(text.replace(/^COOKIE_LOCKED:?/, ""));
+    }
+  }
+
+  async function confirmQuitDiscord() {
+    if (!quitPrompt) return;
+    const { hours, games } = quitPrompt;
+    setQuitting(true);
+    try {
+      await invoke("quit_discord");
+      await new Promise((resolve) => setTimeout(resolve, 1500));
+      setQuitPrompt(null);
+      await forgeBadges(hours, games, false);
+    } catch (error) {
+      setQuitPrompt(null);
+      setBadgeMsg(String(error));
+    } finally {
+      setQuitting(false);
+    }
+  }
+
+  async function downloadUpdate() {
+    setUpdateError("");
+    setUpdateProgress({ phase: "downloading", received: 0, total: null, percent: 0 });
+    try {
+      await invoke("download_update");
+    } catch (error) {
+      setUpdateProgress(null);
+      setUpdateError(String(error));
+    }
+  }
+
+  async function stopBadges() {
+    await invoke("stop_badges").catch((error) => setBadgeMsg(String(error)));
+  }
+
   async function switchAccount() {
     setAccountSelected(false);
     setProfile({});
@@ -240,6 +239,105 @@ export default function App() {
     setScanNotes([]);
     setTab("home");
     await scanTokens(false);
+  }
+
+  useEffect(() => {
+    let cancelled = false;
+    const unlisteners: Array<() => void> = [];
+
+    void listen<string>("bot-log", (event) => {
+      setLog((previous) => [
+        ...previous.split("\n").filter(Boolean),
+        event.payload,
+      ].slice(-500).join("\n"));
+    }).then((unlisten) => (cancelled ? unlisten() : unlisteners.push(unlisten)));
+
+    void listen<BotStatus>("bot-state", (event) => applyStatus(event.payload)).then(
+      (unlisten) => {
+        cancelled ? unlisten() : unlisteners.push(unlisten);
+      },
+    );
+
+    void listen<string>("badge-log", (event) => {
+      setBadgeLog((previous) => [
+        ...previous.split("\n").filter(Boolean),
+        event.payload,
+      ].slice(-500).join("\n"));
+    }).then((unlisten) => (cancelled ? unlisten() : unlisteners.push(unlisten)));
+
+    void listen<BadgeRunState>("badge-state", (event) =>
+      setBadgeState(event.payload),
+    ).then((unlisten) => (cancelled ? unlisten() : unlisteners.push(unlisten)));
+
+    void listen<UpdateProgress>("update-progress", (event) =>
+      setUpdateProgress(event.payload),
+    ).then((unlisten) => (cancelled ? unlisten() : unlisteners.push(unlisten)));
+
+    const checkForUpdate = () => {
+      void invoke<UpdateInfo>("check_update")
+        .then((info) => {
+          if (!cancelled && info.available) setUpdate(info);
+        })
+        .catch(() => undefined);
+    };
+    const updateKickoff = window.setTimeout(checkForUpdate, 5000);
+    const updateTimer = window.setInterval(checkForUpdate, 30 * 60 * 1000);
+
+    void (async () => {
+      const config = await invoke<Config>("app_config").catch(() => ({}) as Config);
+      if (cancelled) return;
+      setCfg(config);
+      setSelfDeaf((config.SELF_DEAF || "").toLowerCase() === "true");
+
+      const status = await invoke<BotStatus>("bot_status").catch(() => null);
+      if (status && !cancelled) applyStatus(status);
+
+      const badge = await invoke<{ running: boolean }>("badge_status").catch(() => null);
+      if (badge && !cancelled) {
+        setBadgeState((current) => ({ ...current, running: badge.running }));
+      }
+
+      const savedToken = (config.DISCORD_TOKEN || "").trim();
+      if (savedToken) {
+        setAccountSelected(true);
+        try {
+          const me = await invoke<Profile>("account_profile", { token: savedToken });
+          if (!cancelled) {
+            setProfile(me);
+            setMsg("");
+          }
+        } catch (error) {
+          if (!cancelled) setMsg(`Saved token could not be verified: ${String(error)}`);
+        }
+      } else {
+        void scanTokens(true);
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+      window.clearTimeout(updateKickoff);
+      window.clearInterval(updateTimer);
+      for (const unlisten of unlisteners) unlisten();
+    };
+    // Boot once; scanTokens/selectAccount read live state through refs.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [applyStatus, setCfg]);
+
+  useEffect(() => {
+    const box = logBoxRef.current;
+    if (box) box.scrollTop = box.scrollHeight;
+  }, [log]);
+
+  function changeTab(next: Tab) {
+    setTab(next);
+    setMsg("");
+  }
+
+  function fieldChanged(key: string, value: string) {
+    const next = { ...cfgRef.current, [key]: value };
+    cfgRef.current = next;
+    setCfgState(next);
   }
 
   return (
@@ -255,9 +353,17 @@ export default function App() {
           onSwitchAccount={switchAccount}
         />
 
-        <section className="app-workspace flex min-w-0 flex-1 flex-col overflow-hidden rounded-[20px] border bg-card">
+        <section className="app-workspace flex min-h-0 flex-1 flex-col overflow-hidden rounded-[20px] border bg-card">
           <div className="min-h-0 flex-1 overflow-y-auto">
             <div className="mx-auto flex min-h-full w-full max-w-5xl flex-col p-6">
+              {update?.available && (
+                <UpdateBanner
+                  info={update}
+                  progress={updateProgress}
+                  error={updateError}
+                  onDownload={() => void downloadUpdate()}
+                />
+              )}
               {!accountSelected ? (
                 <LoginPanel
                   tokens={tokens}
@@ -282,8 +388,18 @@ export default function App() {
                   onSetPlatform={setPlatform}
                   onSave={save}
                 />
-              ) : tab === "logs" ? (
-                <LogsPage
+              ) : tab === "badges" ? (
+                <BadgesPage
+                  cfg={cfg}
+                  state={badgeState}
+                  log={badgeLog}
+                  message={badgeMsg}
+                  onForge={forgeBadges}
+                  onStop={stopBadges}
+                />
+              ) : tab === "hypesquad" ? (
+                <HypeSquadPage token={(cfg.DISCORD_TOKEN || "").trim()} />
+              ) : tab === "logs" ? (                <LogsPage
                   log={log}
                   running={running}
                   live={live}
@@ -313,6 +429,19 @@ export default function App() {
           </div>
         </section>
       </div>
+
+      <ConfirmDialog
+        open={Boolean(quitPrompt)}
+        title="Quit Discord?"
+        description="Discord is open and keeps its cookie store locked, so the forger cannot read your session cookie. Discord will be closed and the forge will continue automatically."
+        confirmLabel="Quit Discord & forge"
+        busy={quitting}
+        onConfirm={() => void confirmQuitDiscord()}
+        onCancel={() => {
+          setQuitPrompt(null);
+          setBadgeMsg("Forge cancelled — quit Discord to continue.");
+        }}
+      />
     </div>
   );
-}
+}

@@ -104,9 +104,9 @@ fn bot_exe(root: &Path) -> Option<PathBuf> {
     if let Ok(exe) = std::env::current_exe() {
         if let Some(parent) = exe.parent() {
             let candidate = if cfg!(windows) {
-                parent.join("vc-keeper-bot.exe")
+                parent.join("discord-toolbox-bot.exe")
             } else {
-                parent.join("vc-keeper-bot")
+                parent.join("discord-toolbox-bot")
             };
             if candidate.is_file() {
                 return Some(candidate);
@@ -115,9 +115,9 @@ fn bot_exe(root: &Path) -> Option<PathBuf> {
     }
     // Next to the project root's dist/ directory (dev builds).
     let candidate = if cfg!(windows) {
-        root.join("dist").join("vc-keeper-bot.exe")
+        root.join("dist").join("discord-toolbox-bot.exe")
     } else {
-        root.join("dist").join("vc-keeper-bot")
+        root.join("dist").join("discord-toolbox-bot")
     };
     if candidate.is_file() {
         return Some(candidate);

@@ -116,13 +116,16 @@ fn is_windows_installer(name: &str) -> bool {
 }
 
 fn pick_installer(assets: &[Asset]) -> Option<&Asset> {
-    assets
-        .iter()
-        .find(|asset| {
-            let lower = asset.name.to_ascii_lowercase();
-            is_windows_installer(&asset.name) && lower.contains("setup")
+    let find = |predicate: fn(&str) -> bool| {
+        assets.iter().find(|asset| {
+            is_windows_installer(&asset.name) && predicate(&asset.name.to_ascii_lowercase())
         })
-        .or_else(|| assets.iter().find(|asset| is_windows_installer(&asset.name)))
+    };
+    // Regular setup executables are the shipped format; MSI is only a fallback.
+    find(|name| name.contains("setup") && name.ends_with(".exe"))
+        .or_else(|| find(|name| name.contains("setup") && name.ends_with(".msi")))
+        .or_else(|| find(|name| name.ends_with(".exe")))
+        .or_else(|| find(|name| name.ends_with(".msi")))
 }
 
 /// Ask the release feed whether a newer build exists.

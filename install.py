@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""One-command setup for vc-keeper (no shell scripts required)."""
+"""One-command setup for Discord Toolbox (no shell scripts required)."""
 
 import os
 import subprocess
@@ -30,14 +30,14 @@ def venv_python() -> Path:
 
 def main() -> int:
     if not VENV.exists():
-        print("[vc-keeper] creating virtual environment...")
+        print("[discord-toolbox] creating virtual environment...")
         run(sys.executable, "-m", "venv", str(VENV))
 
     py = venv_python()
-    print("[vc-keeper] upgrading pip...")
+    print("[discord-toolbox] upgrading pip...")
     run(str(py), "-m", "pip", "install", "--upgrade", "pip")
 
-    print("[vc-keeper] installing dependencies (this may take a few minutes)...")
+    print("[discord-toolbox] installing dependencies (this may take a few minutes)...")
     run(str(py), "-m", "pip", "install", "-e", ".")
 
     needs_setup = not ENV_FILE.exists()
@@ -53,7 +53,7 @@ def main() -> int:
             needs_setup = True
 
     if needs_setup:
-        print("[vc-keeper] first run setup")
+        print("[discord-toolbox] first run setup")
         try:
             token = input("discord token: ").strip()
             guild = input("server (guild) id: ").strip()
@@ -70,17 +70,17 @@ def main() -> int:
             "REJOIN_COOLDOWN_MAX=120",
         ]
         ENV_FILE.write_text("\n".join(lines) + "\n", encoding="utf-8")
-        print(f"[vc-keeper] wrote {ENV_FILE}")
+        print(f"[discord-toolbox] wrote {ENV_FILE}")
     else:
-        print(f"[vc-keeper] keeping existing {ENV_FILE}")
+        print(f"[discord-toolbox] keeping existing {ENV_FILE}")
 
     print()
-    print("[vc-keeper] install complete.")
-    print("desktop app: pnpm install, then pnpm tauri:dev (or pnpm tauri:build)")
+    print("[discord-toolbox] install complete.")
+    print("desktop app: npm install, then npm run tauri:dev")
     if os.name == "nt":
-        print("headless bot: .\\.venv\\Scripts\\vc-keeper.exe")
+        print("headless bot: .\\.venv\\Scripts\\discord-toolbox.exe")
     else:
-        print("headless bot: ./.venv/bin/vc-keeper")
+        print("headless bot: ./.venv/bin/discord-toolbox")
     return 0
 
 
@@ -88,8 +88,8 @@ if __name__ == "__main__":
     try:
         raise SystemExit(main())
     except subprocess.CalledProcessError as exc:
-        print(f"[vc-keeper] command failed with exit code {exc.returncode}", file=sys.stderr)
+        print(f"[discord-toolbox] command failed with exit code {exc.returncode}", file=sys.stderr)
         raise SystemExit(exc.returncode)
     except KeyboardInterrupt:
-        print("\n[vc-keeper] cancelled", file=sys.stderr)
+        print("\n[discord-toolbox] cancelled", file=sys.stderr)
         raise SystemExit(130)

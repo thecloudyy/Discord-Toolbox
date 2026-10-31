@@ -53,7 +53,17 @@ By using this code, you are automating your Discord account. This is against Dis
    npm run tauri:dev
    ```
 
-   Build installers with `npm run tauri:build` (output in `src-tauri/target/release/bundle`).
+   To build the release app and installer:
+
+   ```
+   npm run build
+   cd src-tauri
+   cargo build --release --features custom-protocol
+   iscc installer.iss
+   ```
+
+   The installer lands in `src-tauri/Output/Discord-Toolbox-setup.exe`. It installs per user
+   and bundles the standalone bot executable from `src-tauri/bin`.
 
 The app detects your Discord accounts automatically and stores the chosen token in `.env`.
 It spawns the Python engine as a child process, streams its log, and reads the live state it
@@ -62,11 +72,12 @@ publishes (`.vc-keeper.state.json`) to draw the platform indicators.
 ## Headless / server
 
 ```
-.venv/bin/vc-keeper            # Linux/macOS
-.venv\Scripts\vc-keeper.exe    # Windows
+.venv/bin/discord-toolbox            # Linux/macOS
+.venv\Scripts\discord-toolbox.exe    # Windows
 ```
 
-See `deploy/vc-keeper.service` for a systemd unit pointing at the repo's virtualenv.
+The engine reads `.env` from the current directory, or from `%LOCALAPPDATA%\Discord Toolbox`
+when the project directory is not writable.
 
 ## Configuration (.env)
 
@@ -136,7 +147,7 @@ src-tauri/src/hypesquad.rs      HypeSquad house manager
 src-tauri/src/updater.rs        GitHub release updater
 src-tauri/capabilities/         window permissions granted to the webview
 install.py, *.bat               source install and start helpers
-deploy/vc-keeper.service        systemd unit for source installs on Linux
+discord-toolbox-bot.spec        PyInstaller spec for the standalone bot executable
 ```
 
 ## License

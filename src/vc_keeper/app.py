@@ -48,7 +48,7 @@ def _load_dotenv() -> None:
     for key, value in read_env(path).items():
         os.environ.setdefault(key, value)
 
-log = logging.getLogger("vc_keeper")
+log = logging.getLogger("discord-toolbox")
 
 EXIT_OK = 0
 EXIT_CRASH = 1
@@ -575,7 +575,7 @@ def main() -> None:
         sys.exit(EXIT_CONFIG)
 
     _setup_logging(config.log_level)
-    log.info("starting vc-keeper (target %s in guild %s)", config.channel_id, config.guild_id)
+    log.info("starting discord-toolbox (target %s in guild %s)", config.channel_id, config.guild_id)
 
     backoff = 5.0
     while True:

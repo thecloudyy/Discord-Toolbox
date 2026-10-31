@@ -17,7 +17,7 @@ def fetch_profile(token: str, size: int = 128) -> dict[str, object]:
 
     request = urllib.request.Request(
         API_URL,
-        headers={"Authorization": token, "User-Agent": "vc-keeper"},
+        headers={"Authorization": token, "User-Agent": "discord-toolbox"},
     )
     try:
         with urllib.request.urlopen(request, timeout=10) as response:

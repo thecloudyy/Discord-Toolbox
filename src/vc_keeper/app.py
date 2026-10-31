@@ -114,6 +114,8 @@ class ConfigError(Exception):
 
 def _read_id(env: Mapping[str, str], name: str, problems: list[str]) -> int:
     raw = env.get(name, "").strip()
+    if not raw:
+        return 0
     if not SNOWFLAKE.fullmatch(raw):
         problems.append(f"{name} must be a Discord ID (16-22 digits)")
         return 0
@@ -163,6 +165,8 @@ class Config:
 
         guild_id = _read_id(env, "DISCORD_GUILD_ID", problems)
         channel_id = _read_id(env, "DISCORD_CHANNEL_ID", problems)
+        if channel_id and not guild_id:
+            problems.append("DISCORD_GUILD_ID is required when a voice channel is set")
         cooldown_min = _read_seconds(env, "REJOIN_COOLDOWN_MIN", 10, problems)
         cooldown_max = _read_seconds(env, "REJOIN_COOLDOWN_MAX", 120, problems)
         if cooldown_max < cooldown_min:
@@ -196,6 +200,10 @@ class Config:
             token, guild_id, channel_id, self_deaf, cooldown_min, cooldown_max, log_level,
             status, activity_type, activity_text, custom_status, platform,
         )
+
+    @property
+    def voice_enabled(self) -> bool:
+        return bool(self.guild_id and self.channel_id)
 
     def presence(self) -> tuple[str, str, str, str]:
         """The parts of the config that only affect presence, for change detection."""
@@ -246,6 +254,8 @@ class VcKeeper(discord.Client):
     async def on_ready(self) -> None:
         assert self.user is not None
         log.info("logged in as %s (%s)", self.user, self.user.id)
+        if not self.config.voice_enabled:
+            log.info("no voice channel set, staying online only")
         await self._update_presence()
         self._wake.set()
         self.publish_state()
@@ -316,7 +326,7 @@ class VcKeeper(discord.Client):
     async def on_voice_state_update(
         self, member: discord.Member | discord.User, before: discord.VoiceState, after: discord.VoiceState
     ) -> None:
-        if self.user is None or member.id != self.user.id:
+        if not self.config.voice_enabled or self.user is None or member.id != self.user.id:
             return
         guild = getattr(after.channel or before.channel, "guild", None)
         if guild is not None and guild.id != self.config.guild_id:
@@ -378,7 +388,10 @@ class VcKeeper(discord.Client):
                 log.info("presence %s saved, applies on login", detail)
 
         if (config.guild_id, config.channel_id) != (old.guild_id, old.channel_id):
-            log.info("target is now channel %s in guild %s", config.channel_id, config.guild_id)
+            if config.voice_enabled:
+                log.info("target is now channel %s in guild %s", config.channel_id, config.guild_id)
+            else:
+                log.info("voice channel cleared, staying online only")
             if old_vc is not None:
                 try:
                     await old_vc.disconnect(force=True)
@@ -460,6 +473,10 @@ class VcKeeper(discord.Client):
             except TimeoutError:
                 pass
             self._wake.clear()
+
+            if not self.config.voice_enabled:
+                self._kicked = False
+                continue
 
             if self._in_target():
                 failures = 0
@@ -554,7 +571,7 @@ async def _run(config: Config) -> None:
         loop = asyncio.get_running_loop()
 
         def shutdown(sig: signal.Signals) -> None:
-            log.info("got %s, leaving voice and logging out", sig.name)
+            log.info("got %s, shutting down and logging out", sig.name)
             client.request_shutdown()
 
         for sig in (signal.SIGINT, signal.SIGTERM):
@@ -575,7 +592,10 @@ def main() -> None:
         sys.exit(EXIT_CONFIG)
 
     _setup_logging(config.log_level)
-    log.info("starting discord-toolbox (target %s in guild %s)", config.channel_id, config.guild_id)
+    if config.voice_enabled:
+        log.info("starting discord-toolbox (voice %s in guild %s)", config.channel_id, config.guild_id)
+    else:
+        log.info("starting discord-toolbox (no voice channel, online only)")
 
     backoff = 5.0
     while True:

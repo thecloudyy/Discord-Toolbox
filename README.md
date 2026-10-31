@@ -1,11 +1,12 @@
 # Discord Toolbox
 
-Keeps your Discord account in a voice channel 24/7, online with optional custom status/activity.
-Built on discord.py-self. Automating a user account is against Discord's ToS: use at your own risk.
+Keeps your Discord account online, optionally parked in a voice channel, with optional custom
+status/activity. Built on discord.py-self. Automating a user account is against Discord's ToS:
+use at your own risk.
 
 ## Features
 
-- Keeps your account in a target voice channel 24/7 with auto-rejoin
+- Keeps your account online 24/7, optionally parked in a voice channel with auto-rejoin
 - Randomized rejoin cooldowns, zero API polling
 - Optional custom status and activity (playing/listening/watching/competing)
 - Status modes: online, idle, dnd, invisible
@@ -43,8 +44,8 @@ By using this code, you are automating your Discord account. This is against Dis
    ```
 
    On Windows you can also double-click `install.bat`. The installer creates a virtual
-   environment, installs the engine, and prompts for your Discord token / guild / channel on
-   first run (saved to `.env`).
+   environment, installs the engine, and prompts for your Discord token plus the optional guild
+   and voice channel on first run (saved to `.env`).
 
 2. Install the desktop app dependencies and start it:
 
@@ -83,6 +84,7 @@ when the project directory is not writable.
 
 ```
 DISCORD_TOKEN=
+# optional: leave both empty to stay online without joining voice
 DISCORD_GUILD_ID=
 DISCORD_CHANNEL_ID=
 LOG_LEVEL=INFO

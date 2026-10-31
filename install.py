@@ -56,8 +56,8 @@ def main() -> int:
         print("[discord-toolbox] first run setup")
         try:
             token = input("discord token: ").strip()
-            guild = input("server (guild) id: ").strip()
-            channel = input("voice channel id: ").strip()
+            guild = input("server (guild) id (optional): ").strip()
+            channel = input("voice channel id (optional, leave empty to stay online only): ").strip()
         except EOFError:
             token = guild = channel = ""
         lines = [

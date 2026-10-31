@@ -56,7 +56,7 @@ export function Dashboard({
         <div>
           <h1 className="text-2xl font-semibold tracking-tight">Keep alive</h1>
           <p className="mt-1 text-sm text-muted-foreground">
-            Keep your account parked in a voice channel without touching Discord.
+            Keep your account online, with or without a voice channel.
           </p>
         </div>
         <StatusPill running={running} live={live} />
@@ -96,7 +96,7 @@ export function Dashboard({
             <p className="text-xs text-muted-foreground">
               {onlineSummary
                 ? `Online on ${onlineSummary}`
-                : "Not connected yet — start the bot to join voice."}
+                : "Not connected yet. Start the bot to go online."}
             </p>
           </div>
         </div>
@@ -131,9 +131,9 @@ export function Dashboard({
             <HashIcon />
           </span>
           <div>
-            <h3 className="text-sm font-semibold">Voice channel</h3>
+            <h3 className="text-sm font-semibold">Voice channel (optional)</h3>
             <p className="text-xs text-muted-foreground">
-              Where the account should stay parked.
+              Join this channel and stay in it. Leave both fields empty to stay online only.
             </p>
           </div>
         </div>
@@ -172,7 +172,9 @@ export function Dashboard({
             Save configuration
           </Button>
           <p className="text-xs text-muted-foreground">
-            Also saved automatically when you start or restart the bot.
+            {cfg.DISCORD_CHANNEL_ID
+              ? "Server ID is required when a voice channel is set."
+              : "Leave both fields empty to stay online only."}
           </p>
         </div>
       </Card>

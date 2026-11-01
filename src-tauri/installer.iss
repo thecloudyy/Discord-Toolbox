@@ -7,7 +7,7 @@
 
 [Setup]
 AppName=Discord Toolbox
-AppVersion=1.0.2
+AppVersion=1.0.3
 AppPublisher=thecloudyy
 AppCopyright=Copyright (c) 2026 thecloudyy
 DefaultDirName={autopf}\Discord Toolbox

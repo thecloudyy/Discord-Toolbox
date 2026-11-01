@@ -16,10 +16,10 @@ export function UpdateBanner({
   const busy = Boolean(progress) && !error;
   const label =
     progress?.phase === "installing"
-      ? "Starting installer…"
+      ? "Installing and restarting…"
       : progress?.phase === "downloading"
         ? `Downloading… ${progress.percent ?? 0}%`
-        : "Download Update";
+        : "Update and restart";
 
   return (
     <div

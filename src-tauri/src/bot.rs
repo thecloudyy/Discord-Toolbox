@@ -296,7 +296,7 @@ where
     });
 }
 
-async fn kill_child(state: &BotState) {
+pub(crate) async fn kill_child(state: &BotState) {
     let mut guard = state.child.lock().await;
     let Some(mut child) = guard.take() else {
         return;

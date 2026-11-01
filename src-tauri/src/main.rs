@@ -17,6 +17,7 @@ use tauri::Manager;
 fn main() {
     let app = tauri::Builder::default()
         .setup(|app| {
+            updater::cleanup_stale_files();
             app.manage(BotState::new(app.handle().clone()));
             app.manage(BadgeState::new());
             let handle = app.handle().clone();

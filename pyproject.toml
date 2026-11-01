@@ -1,6 +1,6 @@
 [project]
 name = "discord-toolbox"
-version = "1.0.3"
+version = "1.0.4"
 description = "Keeps your Discord account parked in a voice channel, quietly."
 license = "MIT"
 license-files = ["LICENSE"]

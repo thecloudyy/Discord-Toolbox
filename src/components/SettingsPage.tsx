@@ -59,7 +59,7 @@ export function SettingsPage({
               value={cfg.ACTIVITY_TYPE || ""}
               onChange={(event) => onField("ACTIVITY_TYPE", event.target.value)}
             >
-              <option value="">No activity</option>
+              <option value="">Keep current</option>
               <option value="playing">Playing</option>
               <option value="listening">Listening</option>
               <option value="watching">Watching</option>
@@ -68,7 +68,7 @@ export function SettingsPage({
             </Select>
           </Field>
 
-          <Field label="Activity text" hint="The name shown next to the activity type.">
+          <Field label="Activity text" hint="Shown next to the activity type. Leave it empty to keep your current activity.">
             <Input
               value={cfg.ACTIVITY_TEXT || ""}
               onChange={(event) => onField("ACTIVITY_TEXT", event.target.value)}
@@ -76,7 +76,7 @@ export function SettingsPage({
             />
           </Field>
 
-          <Field label="Custom status" hint="Appears under your name in the member list.">
+          <Field label="Custom status" hint="Appears under your name. Leave it empty to keep your current status.">
             <Input
               value={cfg.CUSTOM_STATUS || ""}
               onChange={(event) => onField("CUSTOM_STATUS", event.target.value)}

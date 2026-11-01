@@ -105,6 +105,9 @@ export function Dashboard({
         </div>
 
         {msg && <p className="mt-3 text-xs text-muted-foreground">{msg}</p>}
+        <p className="mt-3 text-xs text-muted-foreground">
+          Closing the window keeps the bot running. Use Stop to end it.
+        </p>
       </Card>
 
       <Card className="flex flex-wrap items-center gap-4 p-5">

@@ -310,7 +310,7 @@ class VcKeeper(discord.Client):
         status = status_map.get(self.config.status, discord.Status.online)
 
         config = self.config
-        activity = None
+        activity: discord.BaseActivity | None = None
         if config.activity_type and config.activity_text:
             factory = ACTIVITY_FACTORIES.get(config.activity_type)
             if factory is not None:
@@ -318,8 +318,14 @@ class VcKeeper(discord.Client):
         if activity is None and config.custom_status:
             activity = discord.CustomActivity(name=config.custom_status)
 
+        # Leave the activity out entirely when nothing is configured. Passing
+        # activity=None tells Discord to clear the current activity and the
+        # custom status, including the ones set from the official client.
         try:
-            await self.change_presence(status=status, activity=activity)
+            if activity is None:
+                await self.change_presence(status=status)
+            else:
+                await self.change_presence(status=status, activity=activity)
         except Exception as exc:
             log.warning("could not update presence: %s", exc)
 

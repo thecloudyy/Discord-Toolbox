@@ -25,10 +25,14 @@ fn main() {
                 let state = app.state::<BotState>();
                 state.child.clone()
             };
-            tauri::async_runtime::spawn(bot::watch_state(handle, child.clone()));
+            let adopted = {
+                let state = app.state::<BotState>();
+                state.adopted.clone()
+            };
+            tauri::async_runtime::spawn(bot::watch_state(handle, child.clone(), adopted.clone()));
             let app_handle = app.handle().clone();
             tauri::async_runtime::spawn(async move {
-                let _ = bot::start_bot_inner(child, app_handle).await;
+                bot::resume_or_start(child, adopted, app_handle).await;
             });
             Ok(())
         })
@@ -54,11 +58,5 @@ fn main() {
         .build(tauri::generate_context!())
         .expect("error while building tauri application");
 
-    app.run(|app_handle, event| {
-        if matches!(event, tauri::RunEvent::Exit) {
-            if let Some(state) = app_handle.try_state::<BotState>() {
-                bot::kill_on_exit(&state);
-            }
-        }
-    });
+    app.run(|_, _| {});
 }

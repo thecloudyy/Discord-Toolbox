@@ -273,13 +273,6 @@ pub async fn restart_bot(state: State<'_, BotState>) -> Result<(), String> {
     start_bot(state).await
 }
 
-/// Kill the bot immediately (same as stop, kept as a separate UI action).
-#[tauri::command]
-pub async fn terminate_bot(state: State<'_, BotState>) -> Result<(), String> {
-    kill_child(&state).await;
-    Ok(())
-}
-
 /// Current process state plus the live data the bot publishes while running.
 #[tauri::command]
 pub async fn bot_status(state: State<'_, BotState>) -> Result<Value, String> {
@@ -377,9 +370,13 @@ fn read_state() -> Option<Value> {
 
 async fn status_for(child: &Arc<Mutex<Option<Child>>>) -> Value {
     let pid = current_pid(child).await;
-    // Only trust state published by the child we actually spawned.
+    // Only trust state published by the child we actually spawned. A onefile
+    // PyInstaller bundle restarts itself, so accept its launcher pid too.
     let live = match pid {
-        Some(pid) => read_state().filter(|state| state.get("pid").and_then(Value::as_u64) == Some(pid as u64)),
+        Some(pid) => read_state().filter(|state| {
+            let matches = |key: &str| state.get(key).and_then(Value::as_u64) == Some(pid as u64);
+            matches("pid") || matches("launcher_pid")
+        }),
         None => None,
     };
     let field = |key: &str| live.as_ref().and_then(|state| state.get(key)).cloned();

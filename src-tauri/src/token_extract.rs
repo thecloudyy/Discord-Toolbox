@@ -53,6 +53,9 @@ pub struct ScanReport {
 }
 
 /// Scan every known Discord profile and attach the matching Discord profile.
+///
+/// Tokens Discord will not resolve (expired entries left in leveldb) are dropped,
+/// and two tokens pointing at the same account are collapsed into one.
 pub async fn scan_with_profiles() -> ScanReport {
     let (found, mut notes) = scan_local_profiles();
     let mut accounts = Vec::new();
@@ -61,27 +64,38 @@ pub async fn scan_with_profiles() -> ScanReport {
     }
 
     let client = match build_http_client() {
-        Ok(client) => Some(client),
+        Ok(client) => client,
         Err(error) => {
             notes.push(error);
-            None
+            return ScanReport { accounts, notes };
         }
     };
 
+    let mut seen_ids: Vec<String> = Vec::new();
     for (label, token) in found {
-        let profile = match &client {
-            Some(client) => match fetch_profile_with(client, &token).await {
-                Ok(profile) => profile,
-                Err(error) => {
-                    notes.push(format!(
-                        "{label}: token found, but the profile lookup failed ({error})"
-                    ));
-                    Profile::default()
-                }
-            },
-            None => Profile::default(),
+        let profile = match fetch_profile_with(&client, &token).await {
+            Ok(profile) => profile,
+            Err(error) => {
+                notes.push(format!(
+                    "{label}: token found, but the profile lookup failed ({error})"
+                ));
+                continue;
+            }
         };
+        if let Some(id) = profile.id.as_deref() {
+            if seen_ids.iter().any(|seen| seen == id) {
+                continue;
+            }
+            seen_ids.push(id.to_string());
+        }
         accounts.push(DetectedAccount { client: label, token, profile });
+    }
+
+    if accounts.is_empty() {
+        notes.push(
+            "No saved account could be verified with Discord. Sign in to Discord, then detect again."
+                .to_string(),
+        );
     }
 
     ScanReport { accounts, notes }
@@ -101,26 +115,57 @@ fn build_http_client() -> Result<reqwest::Client, String> {
         .map_err(|error| format!("could not create HTTP client: {error}"))
 }
 
+struct ProfileError {
+    message: String,
+    retryable: bool,
+}
+
 async fn fetch_profile_with(client: &reqwest::Client, token: &str) -> Result<Profile, String> {
+    let mut last_message = String::from("profile lookup failed");
+    for attempt in 0..3u32 {
+        match fetch_profile_once(client, token).await {
+            Ok(profile) => return Ok(profile),
+            Err(error) => {
+                last_message = error.message;
+                if !error.retryable || attempt == 2 {
+                    break;
+                }
+                tokio::time::sleep(Duration::from_millis(700 * u64::from(attempt + 1))).await;
+            }
+        }
+    }
+    Err(last_message)
+}
+
+async fn fetch_profile_once(client: &reqwest::Client, token: &str) -> Result<Profile, ProfileError> {
     let response = client
         .get(API_ME)
         .header("Authorization", token)
         .send()
         .await
-        .map_err(|error| format!("network error: {error}"))?;
+        .map_err(|error| ProfileError {
+            message: format!("network error: {error}"),
+            retryable: true,
+        })?;
 
     let status = response.status();
     if status.as_u16() == 401 || status.as_u16() == 403 {
-        return Err("Discord rejected this token".to_string());
+        return Err(ProfileError {
+            message: "Discord rejected this token".to_string(),
+            retryable: false,
+        });
     }
     if !status.is_success() {
-        return Err(format!("Discord replied with HTTP {}", status.as_u16()));
+        return Err(ProfileError {
+            message: format!("Discord replied with HTTP {}", status.as_u16()),
+            retryable: status.as_u16() == 429 || status.is_server_error(),
+        });
     }
 
-    let body: serde_json::Value = response
-        .json()
-        .await
-        .map_err(|error| format!("could not read Discord's response: {error}"))?;
+    let body: serde_json::Value = response.json().await.map_err(|error| ProfileError {
+        message: format!("could not read Discord's response: {error}"),
+        retryable: true,
+    })?;
     Ok(profile_from_json(&body))
 }
 

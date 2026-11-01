@@ -1,32 +1,28 @@
 import type { Config } from "../types";
 import { platformMeta, spoofGroups } from "../lib/platform";
-import { Button, Callout, Card, Field, Input, Select, Switch } from "./ui";
+import { Button, Callout, Card, Field, Input, Select } from "./ui";
 import { AlertIcon, PlatformGlyph, SlidersIcon } from "./icons";
 import { cx } from "../lib/utils";
 
 export function SettingsPage({
   cfg,
   selectedPlatform,
-  selfDeaf,
   msg,
   onField,
-  onSelfDeaf,
   onSetPlatform,
   onSave,
 }: {
   cfg: Config;
   selectedPlatform: string;
-  selfDeaf: boolean;
   msg: string;
   onField: (key: string, value: string) => void;
-  onSelfDeaf: (value: boolean) => void;
   onSetPlatform: (value: string) => void;
   onSave: () => void;
 }) {
   return (
     <div className="space-y-5">
       <header>
-        <h1 className="text-2xl font-semibold tracking-tight">Settings</h1>
+        <h1 className="text-2xl font-semibold tracking-tight">Presence and platform</h1>
         <p className="mt-1 text-sm text-muted-foreground">
           Presence, activity and the client platform Discord sees.
         </p>
@@ -40,7 +36,7 @@ export function SettingsPage({
           <div>
             <h3 className="text-sm font-semibold">Presence</h3>
             <p className="text-xs text-muted-foreground">
-              What your account shows while it sits in voice.
+              What your account shows while it stays online.
             </p>
           </div>
         </div>
@@ -151,17 +147,10 @@ export function SettingsPage({
       </Card>
 
       <Card className="space-y-4 p-5">
-        <Switch
-          checked={selfDeaf}
-          onChange={onSelfDeaf}
-          label="Self-deafen"
-          description="Join the channel with your microphone muted and headphones off. Applies on the next login."
-        />
-
         <div className="flex flex-wrap items-center gap-3">
           <Button onClick={onSave}>Save configuration</Button>
           <p className="text-xs text-muted-foreground">
-            Token, platform and self-deafen changes apply after a restart.
+            Presence changes apply while the bot runs. Platform changes apply after a restart.
           </p>
         </div>
 

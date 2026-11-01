@@ -50,7 +50,7 @@ export function LoginPanel({
         <div>
           <h2 className="text-2xl font-semibold tracking-tight">Welcome</h2>
           <p className="mt-1 text-sm text-muted-foreground">
-            Sign in with the Discord account you want to keep in voice.
+            Sign in with the Discord account you want to keep online.
           </p>
         </div>
       </div>
@@ -98,6 +98,19 @@ export function LoginPanel({
                 );
               })}
             </div>
+
+            {notes.length > 0 && (
+              <div className="space-y-1.5 border-t border-border/70 px-4 py-3">
+                {notes.map((note) => (
+                  <Callout key={note} tone="warning">
+                    <span className="flex gap-2">
+                      <AlertIcon className="mt-0.5 h-3.5 w-3.5" />
+                      {note}
+                    </span>
+                  </Callout>
+                ))}
+              </div>
+            )}
 
             <div className="flex flex-wrap items-center gap-2 border-t border-border/70 px-5 py-3">
               <Button variant="ghost" size="sm" onClick={onDetect} disabled={detecting}>

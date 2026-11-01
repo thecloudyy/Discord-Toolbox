@@ -1,16 +1,7 @@
 import type { Config, Profile } from "../types";
 import type { PlatformIndicator } from "../lib/platform";
-import { Avatar, Button, Card, Field, Input, StatusPill } from "./ui";
-import {
-  HashIcon,
-  PlayIcon,
-  PlatformGlyph,
-  PowerIcon,
-  RestartIcon,
-  ServerIcon,
-  StopIcon,
-  TerminalIcon,
-} from "./icons";
+import { Avatar, Button, Card, StatusPill } from "./ui";
+import { HashIcon, PlayIcon, PlatformGlyph, RestartIcon, StopIcon, TerminalIcon } from "./icons";
 import { cx } from "../lib/utils";
 
 export function Dashboard({
@@ -20,15 +11,12 @@ export function Dashboard({
   running,
   live,
   cfg,
-  log,
   msg,
-  onField,
-  onSave,
   onStart,
   onStop,
   onRestart,
-  onTerminate,
   onOpenLogs,
+  onOpenVoice,
 }: {
   profile: Profile;
   indicators: PlatformIndicator[];
@@ -36,30 +24,26 @@ export function Dashboard({
   running: boolean;
   live: boolean;
   cfg: Config;
-  log: string;
   msg: string;
-  onField: (key: string, value: string) => void;
-  onSave: () => void;
   onStart: () => void;
   onStop: () => void;
   onRestart: () => void;
-  onTerminate: () => void;
   onOpenLogs: () => void;
+  onOpenVoice: () => void;
 }) {
   const name = profile.global_name || profile.username || "Discord account";
-  const tail =
-    log.split("\n").filter(Boolean).slice(-12).join("\n");
+  const channel = (cfg.DISCORD_CHANNEL_ID || "").trim();
+  const mode = channel
+    ? `Staying in voice channel ${channel}.`
+    : "Keeping the account online without joining voice.";
 
   return (
     <div className="space-y-5">
-      <header className="flex flex-wrap items-end justify-between gap-4">
-        <div>
-          <h1 className="text-2xl font-semibold tracking-tight">Keep alive</h1>
-          <p className="mt-1 text-sm text-muted-foreground">
-            Keep your account online, with or without a voice channel.
-          </p>
-        </div>
-        <StatusPill running={running} live={live} />
+      <header>
+        <h1 className="text-2xl font-semibold tracking-tight">Dashboard</h1>
+        <p className="mt-1 text-sm text-muted-foreground">
+          Account status and bot controls.
+        </p>
       </header>
 
       <Card className="p-5">
@@ -99,6 +83,7 @@ export function Dashboard({
                 : "Not connected yet. Start the bot to go online."}
             </p>
           </div>
+          <StatusPill running={running} live={live} />
         </div>
 
         <div className="mt-4 flex flex-wrap items-center gap-2 border-t border-border/60 pt-4">
@@ -114,85 +99,26 @@ export function Dashboard({
           <Button variant="destructive" onClick={onStop} disabled={!running}>
             <StopIcon /> Stop
           </Button>
-          <Button variant="ghost" onClick={onTerminate} disabled={!running}>
-            <PowerIcon /> Terminate
-          </Button>
           <Button variant="ghost" className="ml-auto" onClick={onOpenLogs}>
-            <TerminalIcon /> View log
+            <TerminalIcon /> View logs
           </Button>
         </div>
 
         {msg && <p className="mt-3 text-xs text-muted-foreground">{msg}</p>}
       </Card>
 
-      <Card className="p-5">
-        <div className="flex items-center gap-2.5">
-          <span className="ui-card flex h-8 w-8 items-center justify-center rounded-lg bg-primary/10 text-primary">
-            <HashIcon />
-          </span>
-          <div>
-            <h3 className="text-sm font-semibold">Voice channel (optional)</h3>
-            <p className="text-xs text-muted-foreground">
-              Join this channel and stay in it. Leave both fields empty to stay online only.
-            </p>
-          </div>
+      <Card className="flex flex-wrap items-center gap-4 p-5">
+        <span className="ui-card flex h-8 w-8 items-center justify-center rounded-lg bg-primary/10 text-primary">
+          <HashIcon />
+        </span>
+        <div className="min-w-0 flex-1">
+          <h3 className="text-sm font-semibold">Running mode</h3>
+          <p className="mt-0.5 text-xs text-muted-foreground">{mode}</p>
         </div>
-
-        <div className="grid gap-4 sm:grid-cols-2">
-          <Field label="Server ID">
-            <div className="relative">
-              <ServerIcon className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-              <Input
-                value={cfg.DISCORD_GUILD_ID || ""}
-                onChange={(event) => onField("DISCORD_GUILD_ID", event.target.value)}
-                placeholder="123456789012345678"
-                inputMode="numeric"
-                spellCheck={false}
-                className="pl-9"
-              />
-            </div>
-          </Field>
-          <Field label="Voice channel ID">
-            <div className="relative">
-              <HashIcon className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-              <Input
-                value={cfg.DISCORD_CHANNEL_ID || ""}
-                onChange={(event) => onField("DISCORD_CHANNEL_ID", event.target.value)}
-                placeholder="123456789012345678"
-                inputMode="numeric"
-                spellCheck={false}
-                className="pl-9"
-              />
-            </div>
-          </Field>
-        </div>
-
-        <div className="flex flex-wrap items-center gap-3">
-          <Button variant="secondary" onClick={onSave}>
-            Save configuration
-          </Button>
-          <p className="text-xs text-muted-foreground">
-            {cfg.DISCORD_CHANNEL_ID
-              ? "Server ID is required when a voice channel is set."
-              : "Leave both fields empty to stay online only."}
-          </p>
-        </div>
-      </Card>
-
-      <Card>
-        <div className="flex items-center justify-between gap-3 border-b border-border/60 px-5 py-3.5">
-          <div className="flex items-center gap-2">
-            <TerminalIcon className="text-muted-foreground" />
-            <h3 className="text-sm font-semibold">Recent activity</h3>
-          </div>
-          <Button variant="ghost" size="sm" onClick={onOpenLogs}>
-            Open log
-          </Button>
-        </div>
-        <pre className="max-h-56 overflow-auto whitespace-pre-wrap px-5 py-4 font-mono text-[11px] leading-5 text-muted-foreground">
-          {tail || "No output yet. Start the bot to see it connect."}
-        </pre>
+        <Button variant="outline" onClick={onOpenVoice}>
+          VC keeper
+        </Button>
       </Card>
     </div>
   );
-}
+}

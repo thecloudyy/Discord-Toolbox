@@ -11,6 +11,7 @@ import { LogsPage } from "./components/LogsPage";
 import { SettingsPage } from "./components/SettingsPage";
 import { TitleBar } from "./components/TitleBar";
 import { UpdateBanner } from "./components/UpdateBanner";
+import { VcKeeperPage } from "./components/VcKeeperPage";
 import {
   buildPlatformIndicators,
   onlineSummaryOf,
@@ -31,7 +32,7 @@ import type {
 } from "./types";
 
 export default function App() {
-  const [tab, setTab] = useState<Tab>("home");
+  const [tab, setTab] = useState<Tab>("dashboard");
   const [tokens, setTokens] = useState<DetectedAccount[]>([]);
   const [scanNotes, setScanNotes] = useState<string[]>([]);
   const [detecting, setDetecting] = useState(false);
@@ -106,7 +107,7 @@ export default function App() {
     setAccountSelected(true);
     setManualToken("");
     setMsg("");
-    setTab("home");
+    setTab("dashboard");
     await patchConfig({ DISCORD_TOKEN: account.token });
   }
 
@@ -120,7 +121,7 @@ export default function App() {
       setAccountSelected(true);
       setManualToken("");
       setMsg("");
-      setTab("home");
+      setTab("dashboard");
       await patchConfig({ DISCORD_TOKEN: token });
     } catch (error) {
       setMsg(String(error) || "Discord rejected this token");
@@ -173,13 +174,6 @@ export default function App() {
     setRunning(false);
     setSessions([]);
     setMsg("Bot stopped");
-  }
-
-  async function terminate() {
-    await invoke("terminate_bot").catch((error) => setMsg(String(error)));
-    setRunning(false);
-    setSessions([]);
-    setMsg("Bot terminated");
   }
 
   async function forgeBadges(hours: number, games: number, allowPrompt = true) {
@@ -237,7 +231,7 @@ export default function App() {
     setMsg("");
     setTokens([]);
     setScanNotes([]);
-    setTab("home");
+    setTab("dashboard");
     await scanTokens(false);
   }
 
@@ -377,14 +371,21 @@ export default function App() {
                   onDetect={() => void scanTokens(false)}
                   onSelect={selectAccount}
                 />
-              ) : tab === "settings" ? (
-                <SettingsPage
+              ) : tab === "vc" ? (
+                <VcKeeperPage
                   cfg={cfg}
-                  selectedPlatform={selectedPlatform}
                   selfDeaf={selfDeaf}
                   msg={msg}
                   onField={fieldChanged}
                   onSelfDeaf={setSelfDeaf}
+                  onSave={save}
+                />
+              ) : tab === "settings" ? (
+                <SettingsPage
+                  cfg={cfg}
+                  selectedPlatform={selectedPlatform}
+                  msg={msg}
+                  onField={fieldChanged}
                   onSetPlatform={setPlatform}
                   onSave={save}
                 />
@@ -399,7 +400,8 @@ export default function App() {
                 />
               ) : tab === "hypesquad" ? (
                 <HypeSquadPage token={(cfg.DISCORD_TOKEN || "").trim()} />
-              ) : tab === "logs" ? (                <LogsPage
+              ) : tab === "logs" ? (
+                <LogsPage
                   log={log}
                   running={running}
                   live={live}
@@ -414,15 +416,12 @@ export default function App() {
                   running={running}
                   live={live}
                   cfg={cfg}
-                  log={log}
                   msg={msg}
-                  onField={fieldChanged}
-                  onSave={save}
                   onStart={start}
                   onStop={stop}
                   onRestart={restart}
-                  onTerminate={terminate}
                   onOpenLogs={() => changeTab("logs")}
+                  onOpenVoice={() => changeTab("vc")}
                 />
               )}
             </div>

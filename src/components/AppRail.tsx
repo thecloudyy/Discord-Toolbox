@@ -1,15 +1,16 @@
 import type { ComponentType, SVGProps } from "react";
 import type { Profile, Tab } from "../types";
 import { AccountMenu } from "./AccountMenu";
-import { HomeIcon, LogInIcon, MedalIcon, SlidersIcon, SparklesIcon, TerminalIcon } from "./icons";
+import { HomeIcon, HashIcon, LogInIcon, MedalIcon, SlidersIcon, SparklesIcon, TerminalIcon } from "./icons";
 import { cx } from "../lib/utils";
 
 const items: Array<{ key: Tab; label: string; icon: ComponentType<SVGProps<SVGSVGElement>> }> = [
-  { key: "home", label: "Keep alive", icon: HomeIcon },
+  { key: "dashboard", label: "Dashboard", icon: HomeIcon },
+  { key: "vc", label: "VC keeper", icon: HashIcon },
   { key: "settings", label: "Presence and platform", icon: SlidersIcon },
   { key: "badges", label: "Badge forger", icon: MedalIcon },
   { key: "hypesquad", label: "HypeSquad", icon: SparklesIcon },
-  { key: "logs", label: "Live log", icon: TerminalIcon },
+  { key: "logs", label: "Logs", icon: TerminalIcon },
 ];
 
 export function AppRail({
@@ -69,7 +70,7 @@ export function AppRail({
             className="rail-button"
             title="Sign in"
             aria-label="Sign in"
-            onClick={() => onTab("home")}
+            onClick={() => onTab("dashboard")}
           >
             <LogInIcon />
             <span className="truncate text-[13px] font-medium">Sign in</span>

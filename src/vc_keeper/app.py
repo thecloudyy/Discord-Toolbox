@@ -443,6 +443,9 @@ class VcKeeper(discord.Client):
             }
         payload = {
             "pid": os.getpid(),
+            # PyInstaller onefile relaunches itself, so the process the app
+            # spawned is this process's parent.
+            "launcher_pid": os.getppid(),
             "started_at": self.started_at,
             "updated_at": time.time(),
             "user": user,

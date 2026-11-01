@@ -39,7 +39,6 @@ fn main() {
             bot::start_bot,
             bot::restart_bot,
             bot::stop_bot,
-            bot::terminate_bot,
             bot::bot_status,
             badges::forge_badges,
             badges::badge_status,

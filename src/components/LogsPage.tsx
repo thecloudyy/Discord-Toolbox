@@ -21,9 +21,9 @@ export function LogsPage({
     <div className="flex min-h-0 flex-1 flex-col gap-4">
       <header className="flex flex-wrap items-end justify-between gap-3">
         <div>
-          <h1 className="text-2xl font-semibold tracking-tight">Live log</h1>
+          <h1 className="text-2xl font-semibold tracking-tight">Logs</h1>
           <p className="mt-1 text-sm text-muted-foreground">
-            Output from the Python engine, updated as it runs.
+            Bot output, updated as it runs.
           </p>
         </div>
         <div className="flex items-center gap-2">

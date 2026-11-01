@@ -18,7 +18,7 @@ const appWindow = (() => {
 })();
 
 export function TitleBar() {
-  const [version, setVersion] = useState("1.0.1");
+  const [version, setVersion] = useState("1.0.2");
   const [maximized, setMaximized] = useState(false);
 
   useEffect(() => {

@@ -1,6 +1,6 @@
 @echo off
 cd /d "%~dp0"
-echo [vc-keeper] Starting bot...
+echo [discord-toolbox] Starting bot...
 if exist ".venv\Scripts\vc-keeper.exe" (
     ".venv\Scripts\vc-keeper.exe"
 ) else (

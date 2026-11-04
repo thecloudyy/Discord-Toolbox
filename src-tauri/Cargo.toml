@@ -1,8 +1,8 @@
 [package]
 name = "discord-toolbox"
-version = "1.0.4"
+version = "1.0.5"
 edition = "2021"
-description = "Discord Toolbox — voice keep-alive and game badge tooling for Discord."
+description = "Discord Toolbox — keep-online and game badge tooling for Discord."
 license = "MIT"
 
 [build-dependencies]

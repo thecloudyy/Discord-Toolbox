@@ -24,7 +24,8 @@ export function SettingsPage({
       <header>
         <h1 className="text-2xl font-semibold tracking-tight">Presence and platform</h1>
         <p className="mt-1 text-sm text-muted-foreground">
-          Presence, activity and the client platform Discord sees.
+          Presence, activity and the client platform Discord sees. Everything here is off
+          until you turn it on.
         </p>
       </header>
 
@@ -42,11 +43,15 @@ export function SettingsPage({
         </div>
 
         <div className="grid gap-4 sm:grid-cols-2">
-          <Field label="Status">
+          <Field
+            label="Status"
+            hint="Keep current leaves whatever status you already have alone."
+          >
             <Select
-              value={cfg.STATUS || "online"}
+              value={cfg.STATUS || ""}
               onChange={(event) => onField("STATUS", event.target.value)}
             >
+              <option value="">Keep current</option>
               <option value="online">Online</option>
               <option value="idle">Idle</option>
               <option value="dnd">Do not disturb</option>
@@ -72,7 +77,7 @@ export function SettingsPage({
             <Input
               value={cfg.ACTIVITY_TEXT || ""}
               onChange={(event) => onField("ACTIVITY_TEXT", event.target.value)}
-              placeholder="e.g. chilling in voice"
+              placeholder="e.g. always around"
             />
           </Field>
 
@@ -80,7 +85,7 @@ export function SettingsPage({
             <Input
               value={cfg.CUSTOM_STATUS || ""}
               onChange={(event) => onField("CUSTOM_STATUS", event.target.value)}
-              placeholder="e.g. always in VC"
+              placeholder="e.g. always online"
             />
           </Field>
         </div>
@@ -94,12 +99,35 @@ export function SettingsPage({
           <div>
             <h3 className="text-sm font-semibold">Platform spoofer</h3>
             <p className="text-xs text-muted-foreground">
-              The client identity Discord builds your session from. Applies on the next login.
+              The client identity Discord builds your session from. Off by default; applies on
+              the next login.
             </p>
           </div>
         </div>
 
         <div className="space-y-3">
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="w-16 shrink-0 text-[11px] font-semibold uppercase tracking-[0.06em] text-muted-foreground">
+              Spoofing
+            </span>
+            <button
+              type="button"
+              aria-pressed={selectedPlatform === "off"}
+              onClick={() => onSetPlatform("off")}
+              className={cx(
+                "inline-flex h-9 items-center gap-2 rounded-lg border px-3 text-sm transition-colors",
+                selectedPlatform === "off"
+                  ? "border-primary/60 bg-primary/15 text-primary shadow-[inset_0_1px_0_hsl(var(--surface-highlight))]"
+                  : "border-border bg-background/40 text-muted-foreground hover:bg-accent hover:text-foreground",
+              )}
+            >
+              Off
+            </button>
+            <span className="text-xs text-muted-foreground">
+              Send the identity the bot normally uses.
+            </span>
+          </div>
+
           {spoofGroups.map((group) => {
             const meta = platformMeta[group.key];
             return (

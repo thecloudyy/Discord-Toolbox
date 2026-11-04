@@ -56,18 +56,14 @@ def main() -> int:
         print("[discord-toolbox] first run setup")
         try:
             token = input("discord token: ").strip()
-            guild = input("server (guild) id (optional): ").strip()
-            channel = input("voice channel id (optional, leave empty to stay online only): ").strip()
         except EOFError:
-            token = guild = channel = ""
+            token = ""
         lines = [
             f"DISCORD_TOKEN={token}",
-            f"DISCORD_GUILD_ID={guild}",
-            f"DISCORD_CHANNEL_ID={channel}",
             "LOG_LEVEL=INFO",
-            "SELF_DEAF=false",
-            "REJOIN_COOLDOWN_MIN=10",
-            "REJOIN_COOLDOWN_MAX=120",
+            "STATUS=",
+            "ACTIVITY_TYPE=",
+            "PLATFORM=off",
         ]
         ENV_FILE.write_text("\n".join(lines) + "\n", encoding="utf-8")
         print(f"[discord-toolbox] wrote {ENV_FILE}")

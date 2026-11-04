@@ -1,7 +1,7 @@
-import type { Config, Profile } from "../types";
+import type { Profile } from "../types";
 import type { PlatformIndicator } from "../lib/platform";
 import { Avatar, Button, Card, StatusPill } from "./ui";
-import { HashIcon, PlayIcon, PlatformGlyph, RestartIcon, StopIcon, TerminalIcon } from "./icons";
+import { PlayIcon, PlatformGlyph, RestartIcon, StopIcon, TerminalIcon } from "./icons";
 import { cx } from "../lib/utils";
 
 export function Dashboard({
@@ -10,32 +10,24 @@ export function Dashboard({
   onlineSummary,
   running,
   live,
-  cfg,
   msg,
   onStart,
   onStop,
   onRestart,
   onOpenLogs,
-  onOpenVoice,
 }: {
   profile: Profile;
   indicators: PlatformIndicator[];
   onlineSummary: string;
   running: boolean;
   live: boolean;
-  cfg: Config;
   msg: string;
   onStart: () => void;
   onStop: () => void;
   onRestart: () => void;
   onOpenLogs: () => void;
-  onOpenVoice: () => void;
 }) {
   const name = profile.global_name || profile.username || "Discord account";
-  const channel = (cfg.DISCORD_CHANNEL_ID || "").trim();
-  const mode = channel
-    ? `Staying in voice channel ${channel}.`
-    : "Keeping the account online without joining voice.";
 
   return (
     <div className="space-y-5">
@@ -106,21 +98,9 @@ export function Dashboard({
 
         {msg && <p className="mt-3 text-xs text-muted-foreground">{msg}</p>}
         <p className="mt-3 text-xs text-muted-foreground">
-          Closing the window keeps the bot running. Use Stop to end it.
+          The bot does not start on its own. Press Start to connect, and closing the window
+          keeps it running.
         </p>
-      </Card>
-
-      <Card className="flex flex-wrap items-center gap-4 p-5">
-        <span className="ui-card flex h-8 w-8 items-center justify-center rounded-lg bg-primary/10 text-primary">
-          <HashIcon />
-        </span>
-        <div className="min-w-0 flex-1">
-          <h3 className="text-sm font-semibold">Running mode</h3>
-          <p className="mt-0.5 text-xs text-muted-foreground">{mode}</p>
-        </div>
-        <Button variant="outline" onClick={onOpenVoice}>
-          VC keeper
-        </Button>
       </Card>
     </div>
   );

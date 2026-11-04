@@ -32,7 +32,7 @@ fn main() {
             tauri::async_runtime::spawn(bot::watch_state(handle, child.clone(), adopted.clone()));
             let app_handle = app.handle().clone();
             tauri::async_runtime::spawn(async move {
-                bot::resume_or_start(child, adopted, app_handle).await;
+                bot::resume_existing(adopted, app_handle).await;
             });
             Ok(())
         })

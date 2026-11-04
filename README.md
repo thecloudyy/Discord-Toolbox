@@ -1,21 +1,20 @@
 # Discord Toolbox
 
-Keeps your Discord account online, optionally parked in a voice channel, with optional custom
-status/activity. Built on discord.py-self. Automating a user account is against Discord's ToS:
-use at your own risk.
+Keeps your Discord account online, with optional custom status/activity. Built on
+discord.py-self. Automating a user account is against Discord's ToS: use it at your own risk.
 
 ## Features
 
-- Keeps your account online 24/7, optionally parked in a voice channel with auto-rejoin
-- Randomized rejoin cooldowns, zero API polling
+- Keeps your account online 24/7, zero API polling
+- Everything optional is off by default: you pick a status, an activity or a platform
 - Optional custom status and activity (playing/listening/watching/competing)
 - Status modes: online, idle, dnd, invisible
-- Platform spoofer: Windows, macOS, Linux, web, Android, iOS, Xbox, PlayStation or VR
+- Optional platform spoofer: Windows, macOS, Linux, web, Android, iOS, Xbox, PlayStation or VR
 - Live platform indicators: one status-coloured icon per platform your account is online on, read from Discord's own session list
-- Self-deafen / self-mute support
 - Desktop app (Tauri + React) with account auto-detection and live log
 - Live status, log lines and platform indicators pushed from the bot to the app, no polling in the UI
-- Most settings apply to the running bot immediately; token, `PLATFORM` and self-deafen need a restart
+- Most settings apply to the running bot immediately; token and `PLATFORM` need a restart
+- The app never starts the bot on its own: press **Start** to connect
 - Token auto-detection from local Discord profiles (Windows)
 - Multi-account selection
 - Game badge forger: credits game time and game variety through Discord's own telemetry
@@ -44,8 +43,8 @@ By using this code, you are automating your Discord account. This is against Dis
    ```
 
    On Windows you can also double-click `install.bat`. The installer creates a virtual
-   environment, installs the engine, and prompts for your Discord token plus the optional guild
-   and voice channel on first run (saved to `.env`).
+   environment, installs the engine, and prompts for your Discord token on first run (saved to
+   `.env`).
 
 2. Install the desktop app dependencies and start it:
 
@@ -67,8 +66,9 @@ By using this code, you are automating your Discord account. This is against Dis
    and bundles the standalone bot executable from `src-tauri/bin`.
 
 The app detects your Discord accounts automatically and stores the chosen token in `.env`.
-It spawns the Python engine as a child process, streams its log, and reads the live state it
-publishes (`.vc-keeper.state.json`) to draw the platform indicators.
+It starts the Python engine as a child process when you press **Start**, streams its log, and
+reads the live state it publishes (`.vc-keeper.state.json`) to draw the platform indicators.
+Closing the window leaves the bot running; reopening the app attaches to it.
 
 ## Headless / server
 
@@ -84,31 +84,27 @@ when the project directory is not writable.
 
 ```
 DISCORD_TOKEN=
-# optional: leave both empty to stay online without joining voice
-DISCORD_GUILD_ID=
-DISCORD_CHANNEL_ID=
 LOG_LEVEL=INFO
-SELF_DEAF=false
-STATUS=online
+# presence is off by default: leave these empty to keep what your account already shows
+STATUS=
 ACTIVITY_TYPE=
 ACTIVITY_TEXT=
 CUSTOM_STATUS=
-PLATFORM=windows
-REJOIN_COOLDOWN_MIN=10
-REJOIN_COOLDOWN_MAX=120
+PLATFORM=off
 ```
 
-Status, activity, custom status and the guild/channel target are picked up by the running bot
-within about a second, no restart needed. Token, `PLATFORM` and self-deafen are only read at
-login, so those need a restart (the app's **Restart** button). The UI says so in the log when
-that happens.
+Status, activity and custom status are picked up by the running bot within about a second, no
+restart needed. Token and `PLATFORM` are only read at login, so those need a restart (the app's
+**Restart** button). The UI says so in the log when that happens.
 
 ## Platforms
 
-`PLATFORM` picks what Discord thinks you are running:
+`PLATFORM` picks what Discord thinks you are running. It defaults to `off`, which sends the
+identity the bot normally uses:
 
 | Value | Shows as |
 | --- | --- |
+| `off` | No spoofing (default) |
 | `windows`, `mac`, `linux` | Desktop on that OS (full desktop client identity) |
 | `web` | Browser |
 | `android`, `ios` | Mobile on that OS |
@@ -137,7 +133,7 @@ Or use the app's auto-detect (Windows).
 ## Layout
 
 ```
-src/vc_keeper/app.py            the bot: config, gateway identity, voice keeper, live state
+src/vc_keeper/app.py            the bot: config, gateway identity, keep-online loop, live state
 src/vc_keeper/envfile.py        shared .env reading/writing and app directory
 src/vc_keeper/token_detect.py   token discovery from local Discord profiles (Windows)
 src/vc_keeper/profile.py        profile lookup for the account picker

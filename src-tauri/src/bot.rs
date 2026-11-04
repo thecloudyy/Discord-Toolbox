@@ -234,11 +234,8 @@ pub async fn write_env_multi(entries: HashMap<String, String>) -> Result<(), Str
     std::fs::write(&path, lines.join("\n") + "\n").map_err(|e| e.to_string())
 }
 
-/// Spawn the Python voice keeper, send its output to the UI through the log
-/// file, and remember the child handle so Stop can end it.
-///
-/// Extracted so it can be called both from the Tauri command and from
-/// `main.rs` setup for auto-start-on-launch.
+/// Spawn the Python engine, send its output to the UI through the log file, and
+/// remember the child handle so Stop can end it.
 pub async fn start_bot_inner(
     child: Arc<Mutex<Option<Child>>>,
     adopted: Arc<Mutex<Option<u32>>>,
@@ -279,19 +276,14 @@ pub async fn start_bot_inner(
     Ok(())
 }
 
-/// Attach to a bot that survived the last app session, or start a new one.
-pub async fn resume_or_start(
-    child: Arc<Mutex<Option<Child>>>,
-    adopted: Arc<Mutex<Option<u32>>>,
-    app: AppHandle,
-) {
+/// Attach to a bot that survived the last app session. The app never starts a
+/// bot on its own; the user has to press Start.
+pub async fn resume_existing(adopted: Arc<Mutex<Option<u32>>>, app: AppHandle) {
     if let Some(pid) = discover_running_bot() {
         *adopted.lock().await = Some(pid);
         tail_log(app.clone(), log_path(), true);
         let _ = app.emit("bot-log", "attached to the bot that was already running");
-        return;
     }
-    let _ = start_bot_inner(child, adopted, app).await;
 }
 
 #[tauri::command]

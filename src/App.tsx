@@ -11,7 +11,6 @@ import { LogsPage } from "./components/LogsPage";
 import { SettingsPage } from "./components/SettingsPage";
 import { TitleBar } from "./components/TitleBar";
 import { UpdateBanner } from "./components/UpdateBanner";
-import { VcKeeperPage } from "./components/VcKeeperPage";
 import {
   buildPlatformIndicators,
   onlineSummaryOf,
@@ -42,7 +41,6 @@ export default function App() {
   const [cfg, setCfgState] = useState<Config>({});
   const cfgRef = useRef<Config>({});
   const [profile, setProfile] = useState<Profile>({});
-  const [selfDeaf, setSelfDeaf] = useState(false);
   const [running, setRunning] = useState(false);
   const [sessions, setSessions] = useState<Session[]>([]);
   const [log, setLog] = useState("");
@@ -63,9 +61,12 @@ export default function App() {
     setCfgState(next);
   }, []);
 
+  const configuredPlatform = (cfg.PLATFORM || "off").toLowerCase();
   const selectedPlatform =
-    platformAlias[(cfg.PLATFORM || "windows").toLowerCase()] || cfg.PLATFORM || "windows";
-  const spoofClient = spoofClientMap[selectedPlatform] || "desktop";
+    configuredPlatform === "off"
+      ? "off"
+      : platformAlias[configuredPlatform] || configuredPlatform;
+  const spoofClient = spoofClientMap[selectedPlatform] || "";
   const indicators = buildPlatformIndicators(sessions, spoofClient);
   const onlineSummary = onlineSummaryOf(indicators);
 
@@ -135,16 +136,13 @@ export default function App() {
   }
 
   async function save() {
-    const next = { ...cfgRef.current, SELF_DEAF: selfDeaf ? "true" : "false" };
-    setCfg(next);
-    await invoke("write_env_multi", { entries: next }).catch(() => undefined);
+    await persistAll();
     setMsg("Configuration saved");
   }
 
   async function persistAll() {
-    const next = { ...cfgRef.current, SELF_DEAF: selfDeaf ? "true" : "false" };
-    setCfg(next);
-    await invoke("write_env_multi", { entries: next }).catch(() => undefined);
+    setCfg({ ...cfgRef.current });
+    await invoke("write_env_multi", { entries: cfgRef.current }).catch(() => undefined);
   }
 
   async function start() {
@@ -281,7 +279,6 @@ export default function App() {
       const config = await invoke<Config>("app_config").catch(() => ({}) as Config);
       if (cancelled) return;
       setCfg(config);
-      setSelfDeaf((config.SELF_DEAF || "").toLowerCase() === "true");
 
       const status = await invoke<BotStatus>("bot_status").catch(() => null);
       if (status && !cancelled) applyStatus(status);
@@ -371,15 +368,6 @@ export default function App() {
                   onDetect={() => void scanTokens(false)}
                   onSelect={selectAccount}
                 />
-              ) : tab === "vc" ? (
-                <VcKeeperPage
-                  cfg={cfg}
-                  selfDeaf={selfDeaf}
-                  msg={msg}
-                  onField={fieldChanged}
-                  onSelfDeaf={setSelfDeaf}
-                  onSave={save}
-                />
               ) : tab === "settings" ? (
                 <SettingsPage
                   cfg={cfg}
@@ -415,13 +403,11 @@ export default function App() {
                   onlineSummary={onlineSummary}
                   running={running}
                   live={live}
-                  cfg={cfg}
                   msg={msg}
                   onStart={start}
                   onStop={stop}
                   onRestart={restart}
                   onOpenLogs={() => changeTab("logs")}
-                  onOpenVoice={() => changeTab("vc")}
                 />
               )}
             </div>
@@ -443,4 +429,4 @@ export default function App() {
       />
     </div>
   );
-}
+}

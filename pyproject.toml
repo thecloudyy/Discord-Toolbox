@@ -1,13 +1,13 @@
 [project]
 name = "discord-toolbox"
-version = "1.0.4"
-description = "Keeps your Discord account parked in a voice channel, quietly."
+version = "1.0.5"
+description = "Keeps your Discord account online, quietly."
 license = "MIT"
 license-files = ["LICENSE"]
 requires-python = ">=3.12"
 dependencies = [
-    # pinned to an audited commit of master (the PyPI release pins an old davey / DAVE voice lib)
-    "discord.py-self[voice] @ git+https://github.com/dolfies/discord.py-self@2ba64a9a997e151a9c259984e0a179b1fdf4aff4",
+    # pinned to an audited commit of master
+    "discord.py-self @ git+https://github.com/dolfies/discord.py-self@2ba64a9a997e151a9c259984e0a179b1fdf4aff4",
 ]
 
 [project.scripts]

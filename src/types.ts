@@ -22,7 +22,7 @@ export type BotStatus = {
   updated_at?: number | null;
 };
 
-export type Tab = "dashboard" | "vc" | "settings" | "badges" | "hypesquad" | "logs";
+export type Tab = "dashboard" | "settings" | "badges" | "hypesquad" | "logs";
 
 export type ProfileBadge = {
   id: string;

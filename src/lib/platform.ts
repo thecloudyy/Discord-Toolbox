@@ -159,7 +159,7 @@ export function buildPlatformIndicators(
     });
   }
 
-  if (indicators.length === 0) {
+  if (indicators.length === 0 && spoofClient) {
     const key = (spoofClient as PlatformKey) in platformMeta ? (spoofClient as PlatformKey) : "desktop";
     const meta = platformMeta[key];
     indicators.push({

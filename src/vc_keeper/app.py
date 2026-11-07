@@ -13,9 +13,14 @@ from dataclasses import dataclass
 from pathlib import Path
 
 if getattr(sys, "frozen", False):
-    # The onefile bundle unpacks curl_cffi's DLLs next to itself.
+    # The onefile bundle unpacks curl_cffi's native DLLs next to itself, under
+    # <MEIPASS>/curl_cffi/ (alongside _wrapper.pyd) and <MEIPASS>/ (the OpenSSL
+    # DLLs PyInstaller collects for libcurl). Register those directories so the
+    # DLLs can be resolved at runtime.
     _base = getattr(sys, "_MEIPASS", "")
-    for _dir in (_base, os.path.join(_base, "curl_cffi.libs")):
+    for _dir in (_base,
+                 os.path.join(_base, "curl_cffi"),
+                 os.path.join(_base, "curl_cffi.libs")):
         if _dir and os.path.isdir(_dir):
             try:
                 os.add_dll_directory(_dir)
@@ -23,6 +28,8 @@ if getattr(sys, "frozen", False):
                 pass
             os.environ["PATH"] = _dir + os.pathsep + os.environ.get("PATH", "")
 
+
+import discord
 
 import discord
 

@@ -1,34 +1,37 @@
+//! Bot lifecycle and configuration commands.
+//!
+//! The engine is now native Rust (see `engine.rs`), so there is no Python child
+//! process, no bundled bot executable and no state file to poll.
+
 use std::collections::HashMap;
-use std::io::{Read, Seek, SeekFrom};
 use std::path::{Path, PathBuf};
-use std::process::Stdio;
-use std::sync::Arc;
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex, RwLock};
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use serde_json::{json, Value};
-use tauri::{AppHandle, Emitter, State};
-use tokio::process::{Child, Command};
-use tokio::sync::Mutex;
+use tauri::State;
+use tokio::task::JoinHandle;
 
-/// A published state file older than this is treated as a dead bot.
-const STATE_FRESH_S: f64 = 60.0;
-/// Windows: CREATE_NO_WINDOW, so the Python engine never flashes a console.
-#[cfg(windows)]
-const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+use crate::engine::{self, Config, LogStore, Shared, Snapshot};
+
+pub struct Running {
+    cancel: Arc<AtomicBool>,
+    task: JoinHandle<()>,
+}
 
 pub struct BotState {
-    pub child: Arc<Mutex<Option<Child>>>,
-    /// Pid of a bot left running by an earlier app session.
-    pub adopted: Arc<Mutex<Option<u32>>>,
-    pub app: AppHandle,
+    running: tokio::sync::Mutex<Option<Running>>,
+    snapshot: Arc<RwLock<Snapshot>>,
+    logs: Arc<Mutex<LogStore>>,
 }
 
 impl BotState {
-    pub fn new(app: AppHandle) -> Self {
+    pub fn new() -> Self {
         Self {
-            child: Arc::new(Mutex::new(None)),
-            adopted: Arc::new(Mutex::new(None)),
-            app,
+            running: tokio::sync::Mutex::new(None),
+            snapshot: Arc::new(RwLock::new(Snapshot::default())),
+            logs: Arc::new(Mutex::new(LogStore::default())),
         }
     }
 }
@@ -36,7 +39,7 @@ impl BotState {
 // ------------------------------------------------------------------ paths
 
 /// Repository root: the checkout in debug builds, and the nearest ancestor of
-/// the executable that has a pyproject.toml in release builds.
+/// the executable that has a Cargo.toml in release builds.
 pub(crate) fn project_root() -> PathBuf {
     if cfg!(debug_assertions) {
         if let Some(dir) = Path::new(env!("CARGO_MANIFEST_DIR")).parent() {
@@ -47,7 +50,7 @@ pub(crate) fn project_root() -> PathBuf {
     let exe = std::env::current_exe().unwrap_or_default();
     let start = exe.parent().map(Path::to_path_buf).unwrap_or_else(|| PathBuf::from("."));
     for dir in start.ancestors() {
-        if dir.join("pyproject.toml").is_file() {
+        if dir.join("Cargo.toml").is_file() {
             return dir.to_path_buf();
         }
     }
@@ -84,92 +87,6 @@ fn env_path() -> PathBuf {
     config_dir().join(".env")
 }
 
-fn state_path() -> PathBuf {
-    config_dir().join(".vc-keeper.state.json")
-}
-
-/// The bot writes its output here instead of a pipe, so the log survives the
-/// app closing and can be picked up again when the app reattaches.
-fn log_path() -> PathBuf {
-    config_dir().join(".vc-keeper.log")
-}
-
-fn venv_python(root: &Path) -> PathBuf {
-    let candidates = if cfg!(windows) {
-        [".venv/Scripts/python.exe", ".venv/bin/python"]
-    } else {
-        [".venv/bin/python", ".venv/Scripts/python.exe"]
-    };
-    for candidate in candidates {
-        let path = root.join(candidate);
-        if path.is_file() {
-            return path;
-        }
-    }
-    PathBuf::from("python")
-}
-
-/// Locate the standalone, self-contained bot executable (built with PyInstaller).
-/// Returns None if not found, in which case the caller falls back to `python -m vc_keeper.app`.
-fn bot_exe(root: &Path) -> Option<PathBuf> {
-    // Next to the Tauri executable (release bundles place resources alongside the exe).
-    if let Ok(exe) = std::env::current_exe() {
-        if let Some(parent) = exe.parent() {
-            let candidate = if cfg!(windows) {
-                parent.join("discord-toolbox-bot.exe")
-            } else {
-                parent.join("discord-toolbox-bot")
-            };
-            if candidate.is_file() {
-                return Some(candidate);
-            }
-        }
-    }
-    // Next to the project root's dist/ directory (dev builds).
-    let candidate = if cfg!(windows) {
-        root.join("dist").join("discord-toolbox-bot.exe")
-    } else {
-        root.join("dist").join("discord-toolbox-bot")
-    };
-    if candidate.is_file() {
-        return Some(candidate);
-    }
-    None
-}
-
-fn python_command(root: &Path) -> Command {
-    let mut cmd = Command::new(venv_python(root));
-    cmd.current_dir(root)
-        .env("PYTHONPATH", root.join("src"))
-        .env("PYTHONUNBUFFERED", "1")
-        .env("PYTHONIOENCODING", "utf-8")
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped());
-    #[cfg(windows)]
-    cmd.creation_flags(CREATE_NO_WINDOW);
-    cmd
-}
-
-/// Build the command to start the bot. Uses the standalone PyInstaller bundle if
-/// available (no Python required on the user's machine), otherwise falls back to
-/// `python -m vc_keeper.app` from the venv.
-fn bot_command(root: &Path) -> Command {
-    if let Some(exe) = bot_exe(root) {
-        let mut cmd = Command::new(exe);
-        cmd.current_dir(config_dir())
-            .env("PYTHONUNBUFFERED", "1")
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped());
-        #[cfg(windows)]
-        cmd.creation_flags(CREATE_NO_WINDOW);
-        cmd
-    } else {
-        let mut cmd = python_command(root);
-        cmd.args(["-m", "vc_keeper.app"]);
-        cmd
-    }
-}
-
 // ------------------------------------------------------------------ commands
 
 /// Scan local Discord clients for tokens and enrich them with their profile.
@@ -191,19 +108,10 @@ pub async fn account_profile(token: String) -> Result<crate::token_extract::Prof
 /// Load .env (KEY=value lines, ignoring blanks and comments).
 #[tauri::command]
 pub async fn app_config() -> HashMap<String, String> {
-    let mut out = HashMap::new();
-    if let Ok(content) = std::fs::read_to_string(env_path()) {
-        for line in content.lines() {
-            let line = line.trim();
-            if line.is_empty() || line.starts_with('#') {
-                continue;
-            }
-            if let Some((key, value)) = line.split_once('=') {
-                out.insert(key.trim().to_string(), value.trim().to_string());
-            }
-        }
+    match std::fs::read_to_string(env_path()) {
+        Ok(content) => engine::parse_env(&content),
+        Err(_) => HashMap::new(),
     }
-    out
 }
 
 /// Write/update keys in .env without clobbering the rest of the file.
@@ -234,311 +142,119 @@ pub async fn write_env_multi(entries: HashMap<String, String>) -> Result<(), Str
     std::fs::write(&path, lines.join("\n") + "\n").map_err(|e| e.to_string())
 }
 
-/// Spawn the Python engine, send its output to the UI through the log file, and
-/// remember the child handle so Stop can end it.
-pub async fn start_bot_inner(
-    child: Arc<Mutex<Option<Child>>>,
-    adopted: Arc<Mutex<Option<u32>>>,
-    app: AppHandle,
-) -> Result<(), String> {
-    if adopted.lock().await.is_some() {
-        return Ok(());
-    }
+/// Start the native gateway engine with the current .env.
+#[tauri::command]
+pub async fn start_bot(state: State<'_, BotState>) -> Result<(), String> {
+    start_inner(&state).await
+}
 
-    let mut guard = child.lock().await;
-    if let Some(c) = guard.as_mut() {
-        if c.try_wait().ok().flatten().is_none() {
+/// Stop the engine and clear its live state.
+#[tauri::command]
+pub async fn stop_bot(state: State<'_, BotState>) -> Result<(), String> {
+    stop_inner(&state).await;
+    Ok(())
+}
+
+/// Restart the engine with the current .env.
+#[tauri::command]
+pub async fn restart_bot(state: State<'_, BotState>) -> Result<(), String> {
+    stop_inner(&state).await;
+    start_inner(&state).await
+}
+
+/// Current engine state plus the live sessions it reports.
+#[tauri::command]
+pub async fn bot_status(state: State<'_, BotState>) -> Result<Value, String> {
+    Ok(status_value(&state.snapshot))
+}
+
+/// Incremental engine log lines: `after` is the last sequence already shown.
+#[tauri::command]
+pub async fn bot_logs(state: State<'_, BotState>, after: u64) -> Result<Value, String> {
+    let store = state.logs.lock().map_err(|_| "log store poisoned".to_string())?;
+    let count = store.lines.len() as u64;
+    let first = store.seq.saturating_sub(count) + 1;
+    let lines: Vec<Value> = store
+        .lines
+        .iter()
+        .enumerate()
+        .map(|(index, line)| (first + index as u64, line))
+        .filter(|(seq, _)| *seq > after)
+        .map(|(seq, line)| json!({ "seq": seq, "line": line }))
+        .collect();
+    Ok(json!({ "lines": lines, "next": store.seq }))
+}
+
+#[tauri::command]
+pub async fn clear_bot_logs(state: State<'_, BotState>) -> Result<(), String> {
+    if let Ok(mut store) = state.logs.lock() {
+        store.lines.clear();
+    }
+    Ok(())
+}
+
+async fn start_inner(state: &BotState) -> Result<(), String> {
+    let mut guard = state.running.lock().await;
+    if let Some(running) = guard.as_ref() {
+        if !running.task.is_finished() {
             return Ok(());
         }
     }
 
-    let root = project_root();
-    let mut cmd = bot_command(&root);
-    let path = log_path();
-    match log_files(&path) {
-        Ok((stdout, stderr)) => {
-            cmd.stdout(stdout).stderr(stderr);
-        }
-        Err(_) => {
-            cmd.stdout(Stdio::null()).stderr(Stdio::null());
-        }
-    }
+    let env = app_config().await;
+    let config = Config::from_map(&env)?;
+    let cancel = Arc::new(AtomicBool::new(false));
+    let shared = Arc::new(Shared::new(
+        state.snapshot.clone(),
+        state.logs.clone(),
+        config.log_level.clone(),
+    ));
+    let task = tokio::spawn(engine::run(
+        config,
+        shared,
+        cancel.clone(),
+        env_path(),
+    ));
 
-    let mut child = cmd.spawn().map_err(|e| format!("failed to start the bot: {e}"))?;
-    let pid = child.id();
-    let _ = child.stdout.take();
-    let _ = child.stderr.take();
-    *guard = Some(child);
-    drop(guard);
-
-    tail_log(app.clone(), path, false);
-    let _ = app.emit("bot-state", json!({ "running": true, "pid": pid, "sessions": [] }));
+    *guard = Some(Running { cancel, task });
     Ok(())
 }
 
-/// Attach to a bot that survived the last app session. The app never starts a
-/// bot on its own; the user has to press Start.
-pub async fn resume_existing(adopted: Arc<Mutex<Option<u32>>>, app: AppHandle) {
-    if let Some(pid) = discover_running_bot() {
-        *adopted.lock().await = Some(pid);
-        tail_log(app.clone(), log_path(), true);
-        let _ = app.emit("bot-log", "attached to the bot that was already running");
+async fn stop_inner(state: &BotState) {
+    let mut guard = state.running.lock().await;
+    if let Some(running) = guard.take() {
+        running.cancel.store(true, Ordering::SeqCst);
+        running.task.abort();
+    }
+    if let Ok(mut snapshot) = state.snapshot.write() {
+        snapshot.running = false;
+        snapshot.connected = false;
+        snapshot.pid = None;
+        snapshot.sessions.clear();
+        snapshot.updated_at = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map(|value| value.as_secs_f64())
+            .unwrap_or(0.0);
     }
 }
 
-#[tauri::command]
-pub async fn start_bot(state: State<'_, BotState>) -> Result<(), String> {
-    start_bot_inner(state.child.clone(), state.adopted.clone(), state.app.clone()).await
-}
-
-/// Stop the bot gracefully, force-killing it if it does not exit in time.
-#[tauri::command]
-pub async fn stop_bot(state: State<'_, BotState>) -> Result<(), String> {
-    kill_child(&state).await;
-    Ok(())
-}
-
-/// Restart the bot with the current .env.
-#[tauri::command]
-pub async fn restart_bot(state: State<'_, BotState>) -> Result<(), String> {
-    kill_child(&state).await;
-    start_bot(state).await
-}
-
-/// Current process state plus the live data the bot publishes while running.
-#[tauri::command]
-pub async fn bot_status(state: State<'_, BotState>) -> Result<Value, String> {
-    Ok(status_for(&state.child, &state.adopted).await)
-}
-
-// ------------------------------------------------------------------ bot process
-
-/// Open the log file for the bot's stdout and stderr. Truncates the previous
-/// session, since a new bot means a new log.
-fn log_files(path: &Path) -> std::io::Result<(Stdio, Stdio)> {
-    if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent)?;
-    }
-    let file = std::fs::File::create(path)?;
-    Ok((Stdio::from(file.try_clone()?), Stdio::from(file)))
-}
-
-/// Follow the log file and forward new lines to the UI. Works for a bot this
-/// app spawned and for one it reattached to after a restart.
-fn tail_log(app: AppHandle, path: PathBuf, from_end: bool) {
-    std::thread::spawn(move || {
-        let mut offset = if from_end {
-            std::fs::metadata(&path).map(|meta| meta.len()).unwrap_or(0)
-        } else {
-            0
-        };
-        let mut pending = String::new();
-        loop {
-            if let Ok(mut file) = std::fs::File::open(&path) {
-                let len = file.metadata().map(|meta| meta.len()).unwrap_or(0);
-                if len < offset {
-                    offset = 0;
-                    pending.clear();
-                }
-                if len > offset && file.seek(SeekFrom::Start(offset)).is_ok() {
-                    let mut chunk = Vec::new();
-                    if file.read_to_end(&mut chunk).is_ok() {
-                        offset += chunk.len() as u64;
-                        pending.push_str(&String::from_utf8_lossy(&chunk));
-                        while let Some(index) = pending.find('\n') {
-                            let line: String = pending.drain(..=index).collect();
-                            let line = line.trim_end_matches(['\r', '\n']);
-                            if !line.is_empty() {
-                                let _ = app.emit("bot-log", line);
-                            }
-                        }
-                    }
-                }
-            }
-            std::thread::sleep(Duration::from_millis(300));
-        }
-    });
-}
-
-#[cfg(windows)]
-fn pid_alive(pid: u32) -> bool {
-    use std::os::windows::process::CommandExt;
-    if pid == 0 {
-        return false;
-    }
-    let output = std::process::Command::new("tasklist")
-        .args(["/FI", &format!("PID eq {pid}"), "/NH", "/FO", "CSV"])
-        .creation_flags(CREATE_NO_WINDOW)
-        .output();
-    let Ok(out) = output else {
-        return false;
-    };
-    // CSV row: "image","pid",... — compare the pid cell exactly, since a plain
-    // substring match also hits PID 0 and unrelated numbers.
-    let text = String::from_utf8_lossy(&out.stdout);
-    text.lines().any(|line| {
-        line.split(',')
-            .nth(1)
-            .map(|cell| cell.trim().trim_matches('"') == pid.to_string())
-            .unwrap_or(false)
-    })
-}
-
-#[cfg(unix)]
-fn pid_alive(pid: u32) -> bool {
-    std::process::Command::new("kill")
-        .args(["-0", &pid.to_string()])
-        .status()
-        .map(|status| status.success())
-        .unwrap_or(false)
-}
-
-fn kill_pid(pid: u32) {
-    #[cfg(windows)]
-    let _ = std::process::Command::new("taskkill")
-        .args(["/PID", &pid.to_string(), "/T", "/F"])
-        .output();
-    #[cfg(unix)]
-    let _ = std::process::Command::new("kill")
-        .args(["-TERM", &pid.to_string()])
-        .output();
-}
-
-/// Find a bot that is still running from an earlier app session, using the
-/// state file it publishes every five seconds.
-fn discover_running_bot() -> Option<u32> {
-    let state = read_state()?;
-    let field = |key: &str| state.get(key).and_then(Value::as_u64).map(|pid| pid as u32);
-    let found = field("launcher_pid")
-        .filter(|pid| pid_alive(*pid))
-        .or_else(|| field("pid").filter(|pid| pid_alive(*pid)));
-    if found.is_none() {
-        let _ = std::fs::remove_file(state_path());
-    }
-    found
-}
-
+/// Used by the updater before replacing the running install.
 pub(crate) async fn kill_child(state: &BotState) {
-    let adopted = state.adopted.lock().await.take();
-    let mut guard = state.child.lock().await;
-    if let Some(mut child) = guard.take() {
-        if let Some(pid) = child.id() {
-            kill_pid(pid);
-        }
-        if tokio::time::timeout(Duration::from_secs(5), child.wait()).await.is_err() {
-            let _ = child.start_kill();
-            let _ = child.wait().await;
-        }
-    } else if let Some(pid) = adopted {
-        kill_pid(pid);
-        for _ in 0..50 {
-            if !pid_alive(pid) {
-                break;
-            }
-            tokio::time::sleep(Duration::from_millis(100)).await;
-        }
-    }
-    // The bot publishes state every few seconds, so clear the file or the next
-    // poll would still see a live bot.
-    let _ = std::fs::remove_file(state_path());
-    let _ = state.app.emit("bot-state", json!({ "running": false, "sessions": [] }));
+    stop_inner(state).await;
 }
 
-// ------------------------------------------------------------------ live state
-
-async fn current_pid(child: &Arc<Mutex<Option<Child>>>) -> Option<u32> {
-    let mut guard = child.lock().await;
-    let mut exited = false;
-    let pid = match guard.as_mut() {
-        Some(running) => match running.try_wait() {
-            Ok(Some(_)) => {
-                exited = true;
-                None
-            }
-            Ok(None) => running.id(),
-            Err(_) => None,
-        },
-        None => None,
+fn status_value(snapshot: &Arc<RwLock<Snapshot>>) -> Value {
+    let snapshot = match snapshot.read() {
+        Ok(snapshot) => snapshot.clone(),
+        Err(_) => Snapshot::default(),
     };
-    if exited {
-        *guard = None;
-    }
-    pid
-}
-
-fn read_state() -> Option<Value> {
-    let raw = std::fs::read_to_string(state_path()).ok()?;
-    let value: Value = serde_json::from_str(&raw).ok()?;
-    let updated = value.get("updated_at")?.as_f64()?;
-    let now = SystemTime::now().duration_since(UNIX_EPOCH).ok()?.as_secs_f64();
-    (now - updated <= STATE_FRESH_S).then_some(value)
-}
-
-async fn status_for(child: &Arc<Mutex<Option<Child>>>, adopted: &Arc<Mutex<Option<u32>>>) -> Value {
-    let pid = match current_pid(child).await {
-        Some(pid) => Some(pid),
-        None => *adopted.lock().await,
-    };
-    // Only trust state published by the process we are tracking. A onefile
-    // PyInstaller bundle restarts itself, so accept its launcher pid too.
-    let live = match pid {
-        Some(pid) => read_state().filter(|state| {
-            let matches = |key: &str| state.get(key).and_then(Value::as_u64) == Some(pid as u64);
-            matches("pid") || matches("launcher_pid")
-        }),
-        None => None,
-    };
-    let field = |key: &str| live.as_ref().and_then(|state| state.get(key)).cloned();
-    let sessions = if pid.is_some() {
-        field("sessions").unwrap_or_else(|| json!([]))
-    } else {
-        json!([])
-    };
-
     json!({
-        "running": pid.is_some(),
-        "pid": pid,
-        "updated_at": field("updated_at"),
-        "user": field("user"),
-        "sessions": sessions,
-        "spoofed_platform": field("spoofed_platform"),
+        "running": snapshot.running,
+        "connected": snapshot.connected,
+        "pid": snapshot.pid,
+        "user": snapshot.user,
+        "sessions": snapshot.sessions,
+        "spoofed_platform": snapshot.spoofed_platform,
+        "updated_at": snapshot.updated_at,
     })
-}
-
-/// Poll the child process and its published state, emitting only on changes.
-pub async fn watch_state(
-    app: AppHandle,
-    child: Arc<Mutex<Option<Child>>>,
-    adopted: Arc<Mutex<Option<u32>>>,
-) {
-    let mut last_payload: Option<String> = None;
-    let mut was_running = false;
-    let mut tick: u32 = 0;
-
-    loop {
-        if tick % 5 == 0 {
-            let current = *adopted.lock().await;
-            if let Some(pid) = current {
-                if !pid_alive(pid) {
-                    *adopted.lock().await = None;
-                    let _ = std::fs::remove_file(state_path());
-                }
-            }
-        }
-        tick = tick.wrapping_add(1);
-
-        let status = status_for(&child, &adopted).await;
-        let running = status["running"].as_bool().unwrap_or(false);
-        if was_running && !running {
-            let _ = app.emit("bot-log", "bot process exited");
-        }
-        was_running = running;
-
-        let payload = status.to_string();
-        if last_payload.as_deref() != Some(payload.as_str()) {
-            let _ = app.emit("bot-state", &status);
-            last_payload = Some(payload);
-        }
-        tokio::time::sleep(Duration::from_millis(1000)).await;
-    }
 }

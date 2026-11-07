@@ -2,12 +2,12 @@
   "$schema": "https://schema.tauri.app/config/2.0.0",
   "productName": "Discord Toolbox",
   "mainBinaryName": "discord-toolbox",
-  "version": "1.0.7",
+  "version": "1.0.8",
   "identifier": "com.thecloudyy.discord-toolbox",
   "build": {
-    "beforeDevCommand": "npx vite",
+    "beforeDevCommand": "cd ui && trunk serve",
     "devUrl": "http://localhost:1420",
-    "beforeBuildCommand": "npx tsc --noEmit && npx vite build",
+    "beforeBuildCommand": "cd ui && trunk build --release",
     "frontendDist": "../dist"
   },
   "app": {
@@ -28,15 +28,12 @@
       }
     ],
     "security": {
-      "csp": "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; connect-src 'self' ipc: http://ipc.localhost ws://localhost:1420; frame-ancestors 'none'; object-src 'none'; base-uri 'self'"
+      "csp": "default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; connect-src 'self' ipc: http://ipc.localhost ws://localhost:1420; frame-ancestors 'none'; object-src 'none'; base-uri 'self'"
     }
   },
   "bundle": {
     "active": true,
     "targets": "all",
-    "resources": {
-      "bin/discord-toolbox-bot.exe": "discord-toolbox-bot.exe"
-    },
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",

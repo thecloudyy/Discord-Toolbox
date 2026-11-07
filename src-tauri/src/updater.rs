@@ -1,10 +1,11 @@
-//! GitHub-release updater: downloads the portable package, swaps the app and
-//! bot executables in place, then restarts without running the installer.
+//! GitHub-release updater: downloads the portable package, swaps the app
+//! executable in place, then restarts without running the installer.
 
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Mutex;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use serde::{Deserialize, Serialize};
@@ -22,9 +23,9 @@ const UPDATE_TIMEOUT_SECS: u64 = 300;
 
 /// App executable name inside the portable package.
 const APP_EXE: &str = "discord-toolbox.exe";
-const BOT_EXE: &str = "discord-toolbox-bot.exe";
 
 static DOWNLOADING: AtomicBool = AtomicBool::new(false);
+static PROGRESS: Mutex<Option<UpdateProgress>> = Mutex::new(None);
 
 #[derive(Serialize)]
 pub struct UpdateInfo {
@@ -37,11 +38,11 @@ pub struct UpdateInfo {
 }
 
 #[derive(Serialize, Clone)]
-struct UpdateProgress {
-    phase: &'static str,
-    received: u64,
-    total: Option<u64>,
-    percent: u8,
+pub struct UpdateProgress {
+    pub phase: &'static str,
+    pub received: u64,
+    pub total: Option<u64>,
+    pub percent: u8,
 }
 
 #[derive(Deserialize)]
@@ -257,13 +258,12 @@ async fn stage_and_install(
     extract_package(zip, directory)?;
 
     let new_app = directory.join(APP_EXE);
-    let new_bot = directory.join(BOT_EXE);
-    if !starts_with_pe(&new_app) || !starts_with_pe(&new_bot) {
-        return Err("the update package is missing the app files".into());
+    if !starts_with_pe(&new_app) {
+        return Err("the update package is missing the app executable".into());
     }
 
     crate::bot::kill_child(state).await;
-    install_in_place(&new_app, &new_bot)
+    install_in_place(&new_app)
 }
 
 /// PowerShell by its absolute path; PATH is not guaranteed to include System32
@@ -337,9 +337,9 @@ fn copy_with_retry(from: &Path, to: &Path) -> std::io::Result<()> {
     }))
 }
 
-/// Rename the running executables aside and copy the new ones into their place.
+/// Rename the running executable aside and copy the new one into its place.
 /// Windows allows renaming a running image, which is what makes this work.
-fn install_in_place(new_app: &Path, new_bot: &Path) -> Result<PathBuf, String> {
+fn install_in_place(new_app: &Path) -> Result<PathBuf, String> {
     let exe = std::env::current_exe()
         .map_err(|error| format!("could not locate the running app: {error}"))?;
     let directory = exe
@@ -348,10 +348,7 @@ fn install_in_place(new_app: &Path, new_bot: &Path) -> Result<PathBuf, String> {
         .to_path_buf();
 
     let app_old = directory.join("discord-toolbox.exe.old");
-    let bot_target = directory.join(BOT_EXE);
-    let bot_old = directory.join("discord-toolbox-bot.exe.old");
     let _ = std::fs::remove_file(&app_old);
-    let _ = std::fs::remove_file(&bot_old);
 
     std::fs::rename(&exe, &app_old).map_err(|error| {
         format!(
@@ -362,21 +359,6 @@ fn install_in_place(new_app: &Path, new_bot: &Path) -> Result<PathBuf, String> {
     if let Err(error) = copy_with_retry(new_app, &exe) {
         let _ = std::fs::rename(&app_old, &exe);
         return Err(format!("could not write the new app ({error})"));
-    }
-
-    if bot_target.is_file() {
-        if let Err(error) = std::fs::rename(&bot_target, &bot_old) {
-            let _ = std::fs::rename(&app_old, &exe);
-            return Err(format!("could not replace the bots ({error})"));
-        }
-        if let Err(error) = copy_with_retry(new_bot, &bot_target) {
-            let _ = std::fs::rename(&bot_old, &bot_target);
-            let _ = std::fs::rename(&app_old, &exe);
-            return Err(format!("could not write the new bot ({error})"));
-        }
-    } else if let Err(error) = copy_with_retry(new_bot, &bot_target) {
-        let _ = std::fs::rename(&app_old, &exe);
-        return Err(format!("could not write the new bot ({error})"));
     }
 
     Ok(exe)
@@ -440,10 +422,17 @@ pub fn cleanup_stale_files() {
 }
 
 fn emit_progress(app: &AppHandle, phase: &'static str, received: u64, total: Option<u64>, percent: u8) {
-    let _ = app.emit(
-        "update-progress",
-        UpdateProgress { phase, received, total, percent },
-    );
+    let progress = UpdateProgress { phase, received, total, percent };
+    if let Ok(mut last) = PROGRESS.lock() {
+        *last = Some(progress.clone());
+    }
+    let _ = app.emit("update-progress", progress);
+}
+
+/// Latest download/install progress, polled by the UI.
+#[tauri::command]
+pub fn update_progress() -> Option<UpdateProgress> {
+    PROGRESS.lock().ok().and_then(|value| value.clone())
 }
 
 fn hex_digest(bytes: &[u8]) -> String {

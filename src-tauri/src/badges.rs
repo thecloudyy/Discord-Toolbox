@@ -8,16 +8,15 @@ use std::collections::{HashMap, HashSet};
 use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 #[cfg(target_os = "windows")]
 use std::os::windows::ffi::OsStrExt;
 
 use base64::{engine::general_purpose::STANDARD as BASE64, Engine};
-use serde::Serialize;
 use serde_json::{json, Value};
-use tauri::{AppHandle, Emitter, State};
+use tauri::{AppHandle, Emitter, Manager, State};
 
 const API_ME_ANALYTICS: &str = "https://discord.com/api/v9/users/@me?with_analytics_token=true";
 const SCIENCE: &str = "https://discord.com/api/v9/science";
@@ -34,20 +33,27 @@ const OS_SDK_VERSION: &str = "26200";
 const BATCH_SIZE: usize = 25;
 const BATCH_DELAY_MS: u64 = 450;
 const MAX_RATE_LIMIT_RETRIES: usize = 10;
-/// Ceiling for one run's total playtime budget. Discord's Game Time badge
-/// maxes out at 5,000 cumulative hours, so anything here is already past the
-/// final tier; more only makes the session less plausible.
-const MAX_SAFE_HOURS: f64 = 10_000.0;
+/// Hard floating-point ceiling for one run's total playtime budget. Above
+/// this, `hours * 3_600_000` overflows to infinity. Timestamps are clamped for
+/// unrealistic durations, but the claimed duration itself is preserved.
+const MAX_SAFE_HOURS: f64 = 4.9935920412842105e301;
+/// At this point a backdated start would reach the Unix epoch. Larger values
+/// still work, but their start timestamp clamps to now.
+const BACKDATE_SAFE_HOURS: f64 = 498_000.0;
 /// Lowest plausible playtime credited to a single title.
 const MIN_GAME_HOURS: f64 = 0.1;
 /// Upper bound on a run when "all games" is requested.
 const MAX_GAMES: usize = 100_000;
 const DISCORD_EPOCH_MS: u64 = 1_420_070_400_000;
+/// Pause between full forge passes so repeated runs do not hammer the API.
+const LOOP_PAUSE_MS: u64 = 5_000;
 
 /// Forge run state shared with the UI.
 pub struct BadgeState {
     running: Arc<AtomicBool>,
     cancel: Arc<AtomicBool>,
+    logs: Arc<Mutex<crate::engine::LogStore>>,
+    last: Arc<Mutex<Value>>,
 }
 
 impl BadgeState {
@@ -55,6 +61,8 @@ impl BadgeState {
         Self {
             running: Arc::new(AtomicBool::new(false)),
             cancel: Arc::new(AtomicBool::new(false)),
+            logs: Arc::new(Mutex::new(crate::engine::LogStore::default())),
+            last: Arc::new(Mutex::new(json!({ "running": false }))),
         }
     }
 }
@@ -65,14 +73,36 @@ impl Default for BadgeState {
     }
 }
 
-#[derive(Serialize)]
-pub struct BadgeStatus {
-    pub running: bool,
+#[tauri::command]
+pub fn badge_status(state: State<'_, BadgeState>) -> Value {
+    let mut payload = state
+        .last
+        .lock()
+        .map(|value| value.clone())
+        .unwrap_or_else(|_| json!({}));
+    if let Some(object) = payload.as_object_mut() {
+        object.insert("running".into(), json!(state.running.load(Ordering::SeqCst)));
+    }
+    payload
 }
 
+/// Incremental badge log lines, polled by the UI.
 #[tauri::command]
-pub fn badge_status(state: State<'_, BadgeState>) -> BadgeStatus {
-    BadgeStatus { running: state.running.load(Ordering::SeqCst) }
+pub fn badge_logs(state: State<'_, BadgeState>, after: u64) -> Value {
+    let Ok(store) = state.logs.lock() else {
+        return json!({ "lines": [], "next": after });
+    };
+    let count = store.lines.len() as u64;
+    let first = store.seq.saturating_sub(count) + 1;
+    let lines: Vec<Value> = store
+        .lines
+        .iter()
+        .enumerate()
+        .map(|(index, line)| (first + index as u64, line))
+        .filter(|(seq, _)| *seq > after)
+        .map(|(seq, line)| json!({ "seq": seq, "line": line }))
+        .collect();
+    json!({ "lines": lines, "next": store.seq })
 }
 
 #[tauri::command]
@@ -80,6 +110,19 @@ pub fn stop_badges(state: State<'_, BadgeState>) {
     if state.running.load(Ordering::SeqCst) {
         state.cancel.store(true, Ordering::SeqCst);
     }
+}
+
+/// Reject values that cannot produce a sane, representable session.
+fn validate_hours(hours: f64) -> Result<(), String> {
+    if !hours.is_finite() || hours <= 0.0 {
+        return Err("hours must be a positive number".into());
+    }
+    if hours > MAX_SAFE_HOURS {
+        return Err(format!(
+            "hours must be at most {MAX_SAFE_HOURS} — that is the maximum safe total per run"
+        ));
+    }
+    Ok(())
 }
 
 /// Kick off a forge run and return immediately; progress arrives through events.
@@ -90,19 +133,13 @@ pub async fn forge_badges(
     token: String,
     hours: f64,
     games: usize,
+    repeat: bool,
 ) -> Result<(), String> {
     // Every input is checked up front so a run never starts half-configured.
     let account_token = resolve_token(&token).await?;
     let cookie = resolve_cookie().await?;
 
-    if !hours.is_finite() || hours <= 0.0 {
-        return Err("hours must be a positive number".into());
-    }
-    if hours > MAX_SAFE_HOURS {
-        return Err(format!(
-            "hours must be at most {MAX_SAFE_HOURS} — that is the maximum safe total per run"
-        ));
-    }
+    validate_hours(hours)?;
     // 0 means "every game in the catalog"; the catalog is about 10,000 titles.
     let requested = if games == 0 { MAX_GAMES } else { games.min(MAX_GAMES) };
 
@@ -125,34 +162,109 @@ pub async fn forge_badges(
     } else {
         format!("up to {requested} game(s)")
     };
-    log_line(
-        &app,
-        format!("Preparing to forge {scope} with {hours} hours in total."),
-    );
+    if repeat {
+        log_line(
+            &app,
+            format!("Starting a forge loop over {scope} with {hours} hours per pass."),
+        );
+    } else {
+        log_line(
+            &app,
+            format!("Preparing a single forge over {scope} with {hours} hours in total."),
+        );
+    }
 
     let app_handle = app.clone();
     tauri::async_runtime::spawn(async move {
-        let outcome =
-            forge_inner(&app_handle, &account_token, &cookie, hours, requested, &cancel).await;
-        running.store(false, Ordering::SeqCst);
-        match outcome {
-            Ok(summary) => {
-                if summary.stopped {
-                    log_line(&app_handle, format!("Stopped after {} game(s).", summary.processed));
+        let mut username: Option<String> = None;
+        let mut processed_total = 0usize;
+        let mut pass = 0usize;
+        let mut failure: Option<String> = None;
+
+        loop {
+            if is_cancelled(&cancel) {
+                break;
+            }
+            pass += 1;
+            if repeat {
+                log_line(&app_handle, format!("Loop pass {pass}: starting."));
+            } else {
+                log_line(&app_handle, "Starting forge.".to_string());
+            }
+
+            match forge_inner(
+                &app_handle,
+                &account_token,
+                &cookie,
+                hours,
+                requested,
+                &cancel,
+            )
+            .await
+            {
+                Ok(summary) => {
+                    processed_total += summary.processed;
+                    if summary.username.is_some() {
+                        username = summary.username;
+                    }
+                    if repeat {
+                        log_line(
+                            &app_handle,
+                            format!(
+                                "Loop pass {pass} complete: {} game(s), {processed_total} game credit(s) this session.",
+                                summary.processed
+                            ),
+                        );
+                    } else {
+                        log_line(
+                            &app_handle,
+                            format!("Forge complete: {} game(s) credited.", summary.processed),
+                        );
+                    }
+                    if summary.stopped || is_cancelled(&cancel) || !repeat {
+                        break;
+                    }
                 }
-                emit_state(
-                    &app_handle,
-                    false,
-                    summary.processed,
-                    hours,
-                    summary.username.as_deref(),
-                    None,
-                );
+                Err(error) => {
+                    failure = Some(error);
+                    break;
+                }
             }
-            Err(error) => {
-                log_line(&app_handle, format!("Error: {error}"));
-                emit_state(&app_handle, false, 0, hours, None, Some(&error));
+
+            let mut waited = 0u64;
+            while waited < LOOP_PAUSE_MS && !is_cancelled(&cancel) {
+                let step = 250.min(LOOP_PAUSE_MS - waited);
+                tokio::time::sleep(Duration::from_millis(step)).await;
+                waited += step;
             }
+        }
+
+        running.store(false, Ordering::SeqCst);
+        if let Some(error) = failure {
+            log_line(&app_handle, format!("Error: {error}"));
+            emit_state(&app_handle, false, 0, hours, None, Some(&error));
+        } else {
+            if is_cancelled(&cancel) {
+                if repeat {
+                    log_line(
+                        &app_handle,
+                        format!("Stopped after {pass} pass(es), {processed_total} game(s)."),
+                    );
+                } else {
+                    log_line(
+                        &app_handle,
+                        format!("Stopped after {processed_total} game(s)."),
+                    );
+                }
+            }
+            emit_state(
+                &app_handle,
+                false,
+                processed_total,
+                hours,
+                username.as_deref(),
+                None,
+            );
         }
     });
 
@@ -264,7 +376,12 @@ async fn forge_inner(
 
     let mut rng = Rng::new();
     let requested_per_game = hours / total as f64;
-    let per_game_hours = hours_per_game(hours, total, max_safe_hours(&user_id));
+    let cap = if hours > BACKDATE_SAFE_HOURS {
+        MAX_SAFE_HOURS
+    } else {
+        max_safe_hours(&user_id)
+    };
+    let per_game_hours = hours_per_game(hours, total, cap);
     let credited_hours = per_game_hours * total as f64;
     if per_game_hours < requested_per_game {
         log_line(
@@ -274,7 +391,7 @@ async fn forge_inner(
             ),
         );
     }
-    let duration_ms = (per_game_hours * 3_600_000.0) as u64;
+    let duration_ms = per_game_hours * 3_600_000.0;
     log_line(
         app,
         format!(
@@ -503,17 +620,14 @@ fn select_rotation(
 fn game_events(
     game: &Game,
     fingerprint: &str,
-    duration_ms: u64,
+    duration_ms: f64,
     sequence: &mut u64,
     session: &Session,
     rng: &mut Rng,
 ) -> Vec<Value> {
     let session_id = uuid4(rng);
     let now = now_ms();
-    let started = now
-        .checked_sub(duration_ms)
-        .filter(|timestamp| *timestamp > 0)
-        .unwrap_or(now);
+    let started = session_start(duration_ms, now);
     let game_id = game.id.to_string();
 
     let next = |sequence: &mut u64| {
@@ -691,15 +805,38 @@ fn emit_state(
     if let Some(error) = error {
         payload["error"] = json!(error);
     }
+    let state = app.state::<BadgeState>();
+    if let Ok(mut last) = state.last.lock() {
+        *last = payload.clone();
+    }
     let _ = app.emit("badge-state", payload);
 }
 
 fn log_line(app: &AppHandle, line: String) {
+    let state = app.state::<BadgeState>();
+    if let Ok(mut store) = state.logs.lock() {
+        store.seq = store.seq.wrapping_add(1);
+        store.lines.push_back(line.clone());
+        while store.lines.len() > 500 {
+            store.lines.pop_front();
+        }
+    }
     let _ = app.emit("badge-log", line);
 }
 
 fn is_cancelled(cancel: &AtomicBool) -> bool {
     cancel.load(Ordering::SeqCst)
+}
+
+/// Place the session start in representable Unix time. A duration longer than
+/// the epoch clamps to now instead of wrapping; the claimed duration is sent
+/// unchanged in the final heartbeat.
+fn session_start(duration_ms: f64, now_ms: u64) -> u64 {
+    if !duration_ms.is_finite() || duration_ms >= now_ms as f64 {
+        now_ms
+    } else {
+        now_ms - duration_ms as u64
+    }
 }
 
 fn now_ms() -> u64 {
@@ -1464,7 +1601,7 @@ mod tests {
         let mut sequence = 0u64;
 
         let events =
-            super::game_events(&game, "fingerprint", 86_400_000, &mut sequence, &session, &mut rng);
+            super::game_events(&game, "fingerprint", 86_400_000.0, &mut sequence, &session, &mut rng);
 
         assert_eq!(events.len(), 3);
         assert_eq!(events[0]["type"], "running_game_heartbeat");
@@ -1472,8 +1609,82 @@ mod tests {
         assert_eq!(events[1]["type"], "launch_game");
         assert_eq!(events[1]["properties"]["executable_fingerprint"], "fingerprint");
         assert_eq!(events[2]["properties"]["final_heartbeat"], true);
-        assert_eq!(events[2]["properties"]["duration_tracked_ms"], 86_400_000u64);
+        assert_eq!(
+            events[2]["properties"]["duration_tracked_ms"].as_f64(),
+            Some(86_400_000.0)
+        );
         assert_eq!(sequence, 3);
+    }
+
+    #[test]
+    fn hours_are_capped_at_the_floating_point_limit() {
+        assert!(super::validate_hours(super::MAX_SAFE_HOURS).is_ok());
+        assert!((super::MAX_SAFE_HOURS * 3_600_000.0).is_finite());
+        assert!(super::validate_hours(4.993592041284211e301).is_err());
+        assert!(super::validate_hours(super::MAX_SAFE_HOURS * 2.0).is_err());
+        assert!(super::validate_hours(f64::INFINITY).is_err());
+        assert!(super::validate_hours(f64::NAN).is_err());
+        assert!(super::validate_hours(0.0).is_err());
+    }
+
+    #[test]
+    fn timestamps_clamp_for_durations_beyond_the_epoch() {
+        let now = super::now_ms();
+        let moderate = super::BACKDATE_SAFE_HOURS * 3_600_000.0;
+        assert!(super::session_start(moderate, now) > 0);
+        assert_eq!(super::session_start(1.0e300, now), now);
+        assert_eq!(super::session_start(f64::INFINITY, now), now);
+    }
+
+    #[test]
+    fn huge_duration_survives_in_the_payload() {
+        let session = super::Session {
+            heartbeat_session: "session".into(),
+            launch_signature: "signature".into(),
+            super_props: String::new(),
+        };
+        let game = super::Game { id: 42, name: "Test".into(), executable: "test.exe".into() };
+        let mut rng = super::Rng::new();
+        let mut sequence = 0u64;
+        let huge = 1_573_288_157_121_439.0 / 10_000.0 * 3_600_000.0;
+
+        let events =
+            super::game_events(&game, "fingerprint", huge, &mut sequence, &session, &mut rng);
+
+        assert_eq!(
+            events[2]["properties"]["duration_tracked_ms"].as_f64(),
+            Some(huge)
+        );
+        let body = serde_json::to_string(&events).expect("huge duration must serialize");
+        assert!(body.contains("duration_tracked_ms"));
+    }
+
+    #[test]
+    fn maximum_duration_still_serializes() {
+        let session = super::Session {
+            heartbeat_session: "session".into(),
+            launch_signature: "signature".into(),
+            super_props: String::new(),
+        };
+        let game = super::Game { id: 42, name: "Test".into(), executable: "test.exe".into() };
+        let mut rng = super::Rng::new();
+        let mut sequence = 0u64;
+        let duration = super::MAX_SAFE_HOURS * 3_600_000.0;
+
+        assert_eq!(duration, f64::MAX);
+        let events = super::game_events(
+            &game,
+            "fingerprint",
+            duration,
+            &mut sequence,
+            &session,
+            &mut rng,
+        );
+        assert_eq!(
+            events[2]["properties"]["duration_tracked_ms"].as_f64(),
+            Some(f64::MAX)
+        );
+        serde_json::to_string(&events).expect("maximum duration must serialize");
     }
 
     #[test]
@@ -1492,9 +1703,12 @@ mod tests {
         let ten_hours = super::max_safe_hours(&young_id);
         assert!((ten_hours - 10.0).abs() < 0.1, "got {ten_hours}");
 
-        let old_id =
-            ((1_546_300_800_000u64 - super::DISCORD_EPOCH_MS) << 22).to_string();
-        assert_eq!(super::max_safe_hours(&old_id), super::MAX_SAFE_HOURS);
+        let created = 1_546_300_800_000u64;
+        let old_id = ((created - super::DISCORD_EPOCH_MS) << 22).to_string();
+        let expected = ((now - created) as f64 / 3_600_000.0)
+            .clamp(1.0, super::MAX_SAFE_HOURS);
+        let capped = super::max_safe_hours(&old_id);
+        assert!((capped - expected).abs() < 0.1, "got {capped}, expected {expected}");
     }
 
     #[test]

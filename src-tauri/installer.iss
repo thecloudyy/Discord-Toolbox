@@ -7,7 +7,7 @@
 
 [Setup]
 AppName=Discord Toolbox
-AppVersion=1.0.7
+AppVersion=1.0.8
 AppPublisher=thecloudyy
 AppCopyright=Copyright (c) 2026 thecloudyy
 DefaultDirName={autopf}\Discord Toolbox
@@ -24,10 +24,10 @@ PrivilegesRequired=lowest
 [InstallDelete]
 Type: files; Name: "{app}\discord-keep-alive.exe"
 Type: files; Name: "{app}\vc-keeper-bot.exe"
+Type: files; Name: "{app}\discord-toolbox-bot.exe"
 
 [Files]
 Source: "{#ExePath}"; DestDir: "{app}"; Flags: ignoreversion
-Source: "bin\discord-toolbox-bot.exe"; DestDir: "{app}"; Flags: ignoreversion
 
 [Icons]
 Name: "{autoprograms}\Discord Toolbox"; Filename: "{app}\discord-toolbox.exe"

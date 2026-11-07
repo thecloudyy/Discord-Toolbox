@@ -1,24 +1,18 @@
-# Python
-.venv/
-__pycache__/
-*.pyc
-*.pyo
-*.egg-info/
-
-# Frontend
-node_modules/
-dist/
-build/
-npm-debug.log*
-yarn-debug.log*
-yarn-error.log*
-
-# Tauri
+# Rust build output
+target/
 src-tauri/target/
+ui/target/
+.tools/
+
+# UI build output
+dist/
+
+# Tauri generated files and packaging output
 src-tauri/gen/
-src-tauri/bin/
 src-tauri/Output/
+src-tauri/bin/
 release-artifacts/
+stage/
 
 # Local configuration and runtime state
 .env
@@ -35,7 +29,6 @@ app_debug.txt
 # Archives
 *.zip
 *.tar.gz
-*.whl
 
 # IDE files
 .vscode/

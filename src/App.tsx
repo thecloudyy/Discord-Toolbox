@@ -399,6 +399,7 @@ export default function App() {
               ) : (
                 <Dashboard
                   profile={profile}
+                  token={(cfg.DISCORD_TOKEN || "").trim()}
                   indicators={indicators}
                   onlineSummary={onlineSummary}
                   running={running}

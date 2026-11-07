@@ -1,11 +1,22 @@
+import { useState } from "react";
 import type { Profile } from "../types";
 import type { PlatformIndicator } from "../lib/platform";
 import { Avatar, Button, Card, StatusPill } from "./ui";
-import { PlayIcon, PlatformGlyph, RestartIcon, StopIcon, TerminalIcon } from "./icons";
+import {
+  AlertIcon,
+  CheckIcon,
+  CopyIcon,
+  PlayIcon,
+  PlatformGlyph,
+  RestartIcon,
+  StopIcon,
+  TerminalIcon,
+} from "./icons";
 import { cx } from "../lib/utils";
 
 export function Dashboard({
   profile,
+  token,
   indicators,
   onlineSummary,
   running,
@@ -17,6 +28,7 @@ export function Dashboard({
   onOpenLogs,
 }: {
   profile: Profile;
+  token: string;
   indicators: PlatformIndicator[];
   onlineSummary: string;
   running: boolean;
@@ -28,6 +40,26 @@ export function Dashboard({
   onOpenLogs: () => void;
 }) {
   const name = profile.global_name || profile.username || "Discord account";
+  const [copied, setCopied] = useState(false);
+
+  async function copyToken() {
+    if (!token) return;
+    try {
+      await navigator.clipboard.writeText(token);
+    } catch {
+      // Webview clipboard API can be unavailable; fall back to a hidden textarea.
+      const area = document.createElement("textarea");
+      area.value = token;
+      area.style.position = "fixed";
+      area.style.opacity = "0";
+      document.body.appendChild(area);
+      area.select();
+      document.execCommand("copy");
+      area.remove();
+    }
+    setCopied(true);
+    window.setTimeout(() => setCopied(false), 2000);
+  }
 
   return (
     <div className="space-y-5">
@@ -37,6 +69,31 @@ export function Dashboard({
           Account status and bot controls.
         </p>
       </header>
+
+      <div className="rounded-xl border border-amber-500/30 bg-amber-500/5 p-4">
+        <div className="flex flex-wrap items-start gap-3">
+          <AlertIcon className="mt-0.5 h-5 w-5 text-amber-300" />
+          <div className="min-w-0 flex-1">
+            <p className="text-sm font-semibold text-amber-200">
+              Warning: your token is the keys to your account
+            </p>
+            <p className="mt-1 text-xs leading-relaxed text-amber-200/80">
+              Anyone with this token can sign in as you, read your messages and change your
+              account. Copy it only for your own use — never share it or paste it into another
+              site or app.
+            </p>
+          </div>
+          <Button
+            variant="warning"
+            className="shrink-0"
+            onClick={() => void copyToken()}
+            disabled={!token}
+          >
+            {copied ? <CheckIcon /> : <CopyIcon />}
+            {copied ? "Copied" : "Copy my Discord token"}
+          </Button>
+        </div>
+      </div>
 
       <Card className="p-5">
         <div className="flex flex-wrap items-start gap-4">

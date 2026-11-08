@@ -136,9 +136,6 @@ pub async fn forge_badges(
     repeat: bool,
 ) -> Result<(), String> {
     // Every input is checked up front so a run never starts half-configured.
-    let account_token = resolve_token(&token).await?;
-    let cookie = resolve_cookie().await?;
-
     validate_hours(hours)?;
     // 0 means "every game in the catalog"; the catalog is about 10,000 titles.
     let requested = if games == 0 { MAX_GAMES } else { games.min(MAX_GAMES) };
@@ -148,6 +145,9 @@ pub async fn forge_badges(
         return Err("no executable is available to derive a fingerprint from".into());
     }
 
+    let account_token = resolve_token(&token).await?;
+    let cookie = resolve_cookie().await?;
+
     if state.running.swap(true, Ordering::SeqCst) {
         return Err("badge forging is already running".into());
     }
@@ -156,7 +156,20 @@ pub async fn forge_badges(
     let running = state.running.clone();
     let cancel = state.cancel.clone();
 
-    emit_state(&app, true, requested, hours, None, None);
+    let hours_text = format_hours(hours);
+    emit_status(
+        &app,
+        json!({
+            "running": true,
+            "games": 0,
+            "hours": hours,
+            "processed": 0,
+            "pass": 1,
+            "repeat": repeat,
+            "finished": false,
+            "stopped": false
+        }),
+    );
     let scope = if games == 0 {
         "every detectable game".to_string()
     } else {
@@ -165,12 +178,12 @@ pub async fn forge_badges(
     if repeat {
         log_line(
             &app,
-            format!("Starting a forge loop over {scope} with {hours} hours per pass."),
+            format!("Starting a forge loop over {scope} with {hours_text} hours per pass."),
         );
     } else {
         log_line(
             &app,
-            format!("Preparing a single forge over {scope} with {hours} hours in total."),
+            format!("Preparing a single forge over {scope} with {hours_text} hours in total."),
         );
     }
 
@@ -198,6 +211,8 @@ pub async fn forge_badges(
                 &cookie,
                 hours,
                 requested,
+                pass,
+                repeat,
                 &cancel,
             )
             .await
@@ -240,11 +255,26 @@ pub async fn forge_badges(
         }
 
         running.store(false, Ordering::SeqCst);
+        let cancelled = is_cancelled(&cancel);
         if let Some(error) = failure {
             log_line(&app_handle, format!("Error: {error}"));
-            emit_state(&app_handle, false, 0, hours, None, Some(&error));
+            emit_status(
+                &app_handle,
+                json!({
+                    "running": false,
+                    "games": requested,
+                    "hours": hours,
+                    "processed": processed_total,
+                    "pass": pass,
+                    "repeat": repeat,
+                    "finished": false,
+                    "stopped": false,
+                    "username": username,
+                    "error": error
+                }),
+            );
         } else {
-            if is_cancelled(&cancel) {
+            if cancelled {
                 if repeat {
                     log_line(
                         &app_handle,
@@ -257,13 +287,19 @@ pub async fn forge_badges(
                     );
                 }
             }
-            emit_state(
+            emit_status(
                 &app_handle,
-                false,
-                processed_total,
-                hours,
-                username.as_deref(),
-                None,
+                json!({
+                    "running": false,
+                    "games": requested,
+                    "hours": hours,
+                    "processed": processed_total,
+                    "pass": pass,
+                    "repeat": repeat,
+                    "finished": !cancelled && !repeat,
+                    "stopped": cancelled,
+                    "username": username
+                }),
             );
         }
     });
@@ -308,6 +344,8 @@ async fn forge_inner(
     cookie: &str,
     hours: f64,
     requested: usize,
+    pass: usize,
+    repeat: bool,
     cancel: &AtomicBool,
 ) -> Result<RunSummary, String> {
     if is_cancelled(cancel) {
@@ -328,7 +366,20 @@ async fn forge_inner(
     let (user_id, username, analytics_token) =
         fetch_account(&client, account_token, &session.super_props).await?;
     log_line(app, format!("Signed in as @{username}."));
-    emit_state(app, true, requested, hours, Some(&username), None);
+    emit_status(
+        app,
+        json!({
+            "running": true,
+            "games": 0,
+            "hours": hours,
+            "processed": 0,
+            "pass": pass,
+            "repeat": repeat,
+            "username": username,
+            "finished": false,
+            "stopped": false
+        }),
+    );
 
     if is_cancelled(cancel) {
         return Ok(RunSummary { username: Some(username), processed: 0, stopped: true });
@@ -372,7 +423,20 @@ async fn forge_inner(
             ),
         );
     }
-    emit_state(app, true, total, hours, Some(&username), None);
+    emit_status(
+        app,
+        json!({
+            "running": true,
+            "games": total,
+            "hours": hours,
+            "processed": 0,
+            "pass": pass,
+            "repeat": repeat,
+            "username": username,
+            "finished": false,
+            "stopped": false
+        }),
+    );
 
     let mut rng = Rng::new();
     let requested_per_game = hours / total as f64;
@@ -387,7 +451,9 @@ async fn forge_inner(
         log_line(
             app,
             format!(
-                "Capped at {per_game_hours:.1} hours per game (account age limit), {credited_hours:.0} hours in total."
+                "Capped at {} hours per game (account age limit), {} hours in total.",
+                format_hours(per_game_hours),
+                format_hours(credited_hours)
             ),
         );
     }
@@ -395,7 +461,9 @@ async fn forge_inner(
     log_line(
         app,
         format!(
-            "Crediting {per_game_hours:.1} hours to each of {total} game(s), {credited_hours:.0} hours in total."
+            "Crediting {} hours to each of {total} game(s), {} hours in total.",
+            format_hours(per_game_hours),
+            format_hours(credited_hours)
         ),
     );
     let mut sequence = 0u64;
@@ -441,6 +509,20 @@ async fn forge_inner(
                 "Batch {batch_index}/{total_batches} accepted ({processed}/{total})."
             ),
         );
+        emit_status(
+            app,
+            json!({
+                "running": true,
+                "games": total,
+                "hours": hours,
+                "processed": processed,
+                "pass": pass,
+                "repeat": repeat,
+                "username": username,
+                "finished": false,
+                "stopped": false
+            }),
+        );
 
         if batch_index < total_batches {
             tokio::time::sleep(Duration::from_millis(BATCH_DELAY_MS)).await;
@@ -450,8 +532,8 @@ async fn forge_inner(
     log_line(
         app,
         format!(
-            "Finished: {processed} game(s) credited, {:.0} hours in total.",
-            per_game_hours * processed as f64
+            "Finished: {processed} game(s) credited, {} hours in total.",
+            format_hours(per_game_hours * processed as f64)
         ),
     );
 
@@ -790,26 +872,27 @@ async fn send_batch(
     }
 }
 
-fn emit_state(
-    app: &AppHandle,
-    running: bool,
-    games: usize,
-    hours: f64,
-    username: Option<&str>,
-    error: Option<&str>,
-) {
-    let mut payload = json!({ "running": running, "games": games, "hours": hours });
-    if let Some(username) = username {
-        payload["username"] = json!(username);
-    }
-    if let Some(error) = error {
-        payload["error"] = json!(error);
-    }
+fn emit_status(app: &AppHandle, payload: Value) {
     let state = app.state::<BadgeState>();
     if let Ok(mut last) = state.last.lock() {
         *last = payload.clone();
     }
     let _ = app.emit("badge-state", payload);
+}
+
+/// Keep very large playtime budgets readable in the log instead of printing
+/// hundreds of digits.
+fn format_hours(value: f64) -> String {
+    if !value.is_finite() {
+        return "unlimited".into();
+    }
+    if value >= 1_000_000.0 || (value > 0.0 && value < 0.01) {
+        format!("{value:.4e}")
+    } else if value >= 10.0 {
+        format!("{value:.0}")
+    } else {
+        format!("{value:.2}")
+    }
 }
 
 fn log_line(app: &AppHandle, line: String) {
@@ -1625,6 +1708,14 @@ mod tests {
         assert!(super::validate_hours(f64::INFINITY).is_err());
         assert!(super::validate_hours(f64::NAN).is_err());
         assert!(super::validate_hours(0.0).is_err());
+    }
+
+    #[test]
+    fn hours_log_format_stays_compact() {
+        assert_eq!(super::format_hours(super::MAX_SAFE_HOURS), "4.9936e301");
+        assert_eq!(super::format_hours(24.0), "24");
+        assert_eq!(super::format_hours(0.1), "0.10");
+        assert!(super::format_hours(super::MAX_SAFE_HOURS).len() < 20);
     }
 
     #[test]

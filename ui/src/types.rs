@@ -40,6 +40,16 @@ pub struct BotStatus {
 pub struct BadgeStatus {
     #[serde(default)]
     pub running: bool,
+    #[serde(default)]
+    pub repeat: bool,
+    #[serde(default)]
+    pub finished: bool,
+    #[serde(default)]
+    pub stopped: bool,
+    #[serde(default)]
+    pub processed: usize,
+    #[serde(default)]
+    pub pass: usize,
     pub games: Option<usize>,
     pub hours: Option<f64>,
     pub username: Option<String>,

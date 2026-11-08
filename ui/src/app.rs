@@ -46,6 +46,18 @@ fn event_checked(event: &web_sys::Event) -> bool {
         .unwrap_or(false)
 }
 
+fn format_count(value: usize) -> String {
+    let digits = value.to_string();
+    let mut out = String::new();
+    for (index, digit) in digits.chars().enumerate() {
+        if index > 0 && (digits.len() - index) % 3 == 0 {
+            out.push(',');
+        }
+        out.push(digit);
+    }
+    out
+}
+
 fn truncate_log(text: &mut String) {
     const LIMIT: usize = 60_000;
     if text.len() > LIMIT {
@@ -917,8 +929,9 @@ fn BadgesPage(
             <PageHeader title="Game badges" subtitle="Credit playtime through Discord's own game telemetry.">
                 <span class="live-badge" class:live=move || badge.get().running>
                     <i></i>{move || {
-                        if badge.get().running {
-                            if repeat.get() { "Looping" } else { "Forging" }
+                        let status = badge.get();
+                        if status.running {
+                            if status.repeat { "Looping" } else { "Forging" }
                         } else { "Idle" }
                     }}
                 </span>
@@ -956,8 +969,23 @@ fn BadgesPage(
                     </div>
                     <Show when=move || badge.get().running fallback=|| ()>
                         <div class="forge-progress">
-                            <div class="progress-track"><div class="progress-fill"></div></div>
-                            <span>{move || format!("{} of {} games", badge.get().games.unwrap_or(0), badge.get().hours.unwrap_or(0.0))}</span>
+                            <div class="progress-track"><div class="progress-fill" style=move || {
+                                let status = badge.get();
+                                let total = status.games.unwrap_or(0);
+                                let percent = if total > 0 { (status.processed.saturating_mul(100) / total).min(100) } else { 0 };
+                                format!("width:{percent}%")
+                            }></div></div>
+                            <span>{move || {
+                                let status = badge.get();
+                                let total = status.games.unwrap_or(0);
+                                let processed = status.processed.min(total);
+                                let prefix = if status.repeat { format!("Pass {} · ", status.pass.max(1)) } else { String::new() };
+                                if total == 0 {
+                                    format!("{prefix}Preparing…")
+                                } else {
+                                    format!("{prefix}{} of {} games credited", format_count(processed), format_count(total))
+                                }
+                            }}</span>
                         </div>
                     </Show>
                     <Show when=move || badge.get().error.is_some() fallback=|| ()>
@@ -966,8 +994,19 @@ fn BadgesPage(
                     <Show when=move || !message.get().is_empty() fallback=|| ()>
                         <p class="message error">{move || message.get()}</p>
                     </Show>
-                    <Show when=move || badge.get().username.is_some() fallback=|| ()>
-                        <p class="message success">{move || format!("Finished for {}", badge.get().username.clone().unwrap_or_default())}</p>
+                    <Show when=move || badge.get().finished && badge.get().username.is_some() fallback=|| ()>
+                        <p class="message success">{move || format!(
+                            "Finished for @{} · {} games credited",
+                            badge.get().username.clone().unwrap_or_default(),
+                            format_count(badge.get().processed)
+                        )}</p>
+                    </Show>
+                    <Show when=move || badge.get().stopped && badge.get().username.is_some() fallback=|| ()>
+                        <p class="message">{move || format!(
+                            "Stopped for @{} · {} games credited",
+                            badge.get().username.clone().unwrap_or_default(),
+                            format_count(badge.get().processed)
+                        )}</p>
                     </Show>
                 </div>
                 <div class="card">

@@ -12,7 +12,6 @@ enum Tab {
     Dashboard,
     Badges,
     HypeSquad,
-    Logs,
 }
 
 impl Tab {
@@ -21,7 +20,6 @@ impl Tab {
             Tab::Dashboard => "Dashboard",
             Tab::Badges => "Game badges",
             Tab::HypeSquad => "HypeSquad",
-            Tab::Logs => "Logs",
         }
     }
 }
@@ -108,11 +106,6 @@ pub fn App() -> impl IntoView {
     let checking = RwSignal::new(false);
     let selected = RwSignal::new(false);
     let manual_token = RwSignal::new(String::new());
-    let running = RwSignal::new(false);
-    let connected = RwSignal::new(false);
-    let bot_log = RwSignal::new(String::new());
-    let log_seq = RwSignal::new(0u64);
-    let live = RwSignal::new(false);
     let msg = RwSignal::new(String::new());
     let badge = RwSignal::new(BadgeStatus::default());
     let badge_log = RwSignal::new(String::new());
@@ -124,9 +117,8 @@ pub fn App() -> impl IntoView {
     let update_progress = RwSignal::new(None::<UpdateProgress>);
     let update_error = RwSignal::new(String::new());
     let copied = RwSignal::new(false);
-    let log_box = NodeRef::<leptos::html::Pre>::new();
 
-    // Boot: load config, attach to the native engine, verify the saved token.
+    // Boot: load config and verify the saved token.
     spawn_local({
         let cfg = cfg;
         let profile = profile;
@@ -135,21 +127,10 @@ pub fn App() -> impl IntoView {
         let tokens = tokens;
         let notes = notes;
         let detecting = detecting;
-        let running = running;
-        let connected = connected;
-        let live = live;
         let badge = badge;
         async move {
             let loaded = api::app_config().await;
             cfg.set(loaded.clone());
-
-            let status = api::bot_status().await;
-            running.set(status.running);
-            connected.set(status.connected);
-            if let Some(user) = status.user {
-                profile.set(user);
-            }
-            live.set(true);
 
             let initial_badge = api::badge_status().await;
             badge.set(initial_badge);
@@ -197,14 +178,8 @@ pub fn App() -> impl IntoView {
         }
     });
 
-    // Poll the engine, badge run and updater state. No JS event listeners needed.
+    // Poll badge and updater state. No JS event listeners needed.
     spawn_local({
-        let running = running;
-        let connected = connected;
-        let profile = profile;
-        let live = live;
-        let bot_log = bot_log;
-        let log_seq = log_seq;
         let badge = badge;
         let badge_log = badge_log;
         let badge_seq = badge_seq;
@@ -212,20 +187,6 @@ pub fn App() -> impl IntoView {
         async move {
             loop {
                 TimeoutFuture::new(600).await;
-                let status = api::bot_status().await;
-                running.set(status.running);
-                connected.set(status.connected);
-                if let Some(user) = status.user {
-                    profile.set(user);
-                }
-                live.set(true);
-
-                let (chunk, next) = api::bot_logs(log_seq.get_untracked()).await;
-                if !chunk.is_empty() {
-                    append_log(bot_log, &chunk);
-                    log_seq.set(next);
-                }
-
                 let badge_state = api::badge_status().await;
                 badge.set(badge_state);
 
@@ -239,14 +200,6 @@ pub fn App() -> impl IntoView {
                     update_progress.set(Some(progress));
                 }
             }
-        }
-    });
-
-    // Auto-scroll the log panes.
-    Effect::new(move |_| {
-        let _ = bot_log.get();
-        if let Some(box_element) = log_box.get() {
-            box_element.set_scroll_top(box_element.scroll_height());
         }
     });
 
@@ -315,66 +268,6 @@ pub fn App() -> impl IntoView {
         scan();
     };
 
-    let persist_and_start = move || {
-        let cfg = cfg;
-        let msg = msg;
-        let bot_log = bot_log;
-        let log_seq = log_seq;
-        let running = running;
-        let connected = connected;
-        save_config(cfg);
-        bot_log.set(String::new());
-        log_seq.set(0);
-        spawn_local(async move {
-            match api::start_bot().await {
-                Ok(()) => {
-                    running.set(true);
-                    connected.set(false);
-                    msg.set("Bot started".into());
-                }
-                Err(error) => msg.set(error),
-            }
-        });
-    };
-
-    let restart = move || {
-        let cfg = cfg;
-        let msg = msg;
-        let bot_log = bot_log;
-        let log_seq = log_seq;
-        let running = running;
-        let connected = connected;
-        save_config(cfg);
-        bot_log.set(String::new());
-        log_seq.set(0);
-        spawn_local(async move {
-            match api::restart_bot().await {
-                Ok(()) => {
-                    running.set(true);
-                    connected.set(false);
-                    msg.set("Bot restarted".into());
-                }
-                Err(error) => msg.set(error),
-            }
-        });
-    };
-
-    let stop = move || {
-        let msg = msg;
-        let running = running;
-        let connected = connected;
-        spawn_local(async move {
-            match api::stop_bot().await {
-                Ok(()) => {
-                    running.set(false);
-                    connected.set(false);
-                    msg.set("Bot stopped".into());
-                }
-                Err(error) => msg.set(error),
-            }
-        });
-    };
-
     let copy_token = move |_| {
         let token = cfg.get_untracked().value("DISCORD_TOKEN");
         if token.is_empty() {
@@ -416,7 +309,6 @@ pub fn App() -> impl IntoView {
                     tab=tab
                     selected=selected
                     profile=profile
-                    running=running
                     on_switch=switch_account
                 />
                 <section class="workspace">
@@ -460,33 +352,12 @@ pub fn App() -> impl IntoView {
                                     Tab::HypeSquad => view! {
                                         <HypeSquadPage token=cfg.get_untracked().value("DISCORD_TOKEN") />
                                     }.into_any(),
-                                    Tab::Logs => view! {
-                                        <LogsPage
-                                            log=bot_log
-                                            running=running
-                                            live=live
-                                            log_box=log_box
-                                            on_clear=move |_| {
-                                                bot_log.set(String::new());
-                                                log_seq.set(0);
-                                                spawn_local(async move { api::clear_bot_logs().await; });
-                                            }
-                                        />
-                                    }.into_any(),
                                     Tab::Dashboard => view! {
                                         <Dashboard
                                             profile=profile
                                             cfg=cfg
-                                            running=running
-                                            connected=connected
-                                            live=live
-                                            message=msg
                                             copied=copied
                                             on_copy=copy_token
-                                            on_start=move |_| persist_and_start()
-                                            on_stop=move |_| stop()
-                                            on_restart=move |_| restart()
-                                            on_open_logs=move |_| tab.set(Tab::Logs)
                                         />
                                     }.into_any(),
                                 }}
@@ -534,14 +405,12 @@ fn Rail(
     tab: RwSignal<Tab>,
     selected: RwSignal<bool>,
     profile: RwSignal<Profile>,
-    running: RwSignal<bool>,
     on_switch: impl Fn() + 'static + Copy + Send + Sync,
 ) -> impl IntoView {
     let items = [
         (Tab::Dashboard, "Dashboard", "dashboard"),
         (Tab::Badges, "Game badges", "badges"),
         (Tab::HypeSquad, "HypeSquad", "hypesquad"),
-        (Tab::Logs, "Logs", "logs"),
     ];
 
     view! {
@@ -560,7 +429,6 @@ fn Rail(
                         let icon_view = match icon_name {
                             "badges" => icon::badges().into_any(),
                             "hypesquad" => icon::hypesquad().into_any(),
-                            "logs" => icon::logs().into_any(),
                             _ => icon::dashboard().into_any(),
                         };
                         view! {
@@ -582,10 +450,7 @@ fn Rail(
                     <Avatar profile=profile size=34 />
                     <div class="rail-account-text">
                         <strong>{move || profile.get().display_name()}</strong>
-                        <span>
-                            <i class="status-dot" class:online=move || running.get()></i>
-                            {move || if running.get() { "Online" } else { "Offline" }}
-                        </span>
+                        <span>{move || profile.get().handle()}</span>
                     </div>
                 </div>
                 <button class="rail-switch" on:click=move |_| on_switch()>
@@ -747,25 +612,12 @@ fn LoginPanel(
 fn Dashboard(
     profile: RwSignal<Profile>,
     cfg: RwSignal<Config>,
-    running: RwSignal<bool>,
-    connected: RwSignal<bool>,
-    live: RwSignal<bool>,
-    message: RwSignal<String>,
     copied: RwSignal<bool>,
     on_copy: impl Fn(MouseEvent) + 'static + Copy + Send + Sync,
-    on_start: impl Fn(MouseEvent) + 'static + Copy + Send + Sync,
-    on_stop: impl Fn(MouseEvent) + 'static + Copy + Send + Sync,
-    on_restart: impl Fn(MouseEvent) + 'static + Copy + Send + Sync,
-    on_open_logs: impl Fn(MouseEvent) + 'static + Copy + Send + Sync,
 ) -> impl IntoView {
     view! {
         <div class="fade-in">
-            <PageHeader title="Dashboard" subtitle="Your account, live from the native Rust engine.">
-                <span class="live-badge" class:live=move || live.get() && connected.get() class:warn=move || live.get() && running.get() && !connected.get()>
-                    <i></i>
-                    {move || if !running.get() { "Stopped" } else if connected.get() { "Running" } else { "Connecting" }}
-                </span>
-            </PageHeader>
+            <PageHeader title="Dashboard" subtitle="Your account and saved token." />
 
             <div class="card token-card">
                 <div class="token-icon">{icon::alert()}</div>
@@ -797,55 +649,16 @@ fn Dashboard(
                 </div>
             </div>
 
-            <div class="grid dashboard-grid">
-                <div class="card account-card">
-                    <div class="account-main">
-                        <Avatar profile=profile size=64 />
-                        <div class="account-details">
-                            <h2>{move || profile.get().display_name()}</h2>
-                            <p>{move || profile.get().handle()}</p>
-                            <div class="account-meta">
-                                <span class="pill">{move || profile.get().id.clone().unwrap_or_default()}</span>
-                            </div>
+            <div class="card account-card">
+                <div class="account-main">
+                    <Avatar profile=profile size=64 />
+                    <div class="account-details">
+                        <h2>{move || profile.get().display_name()}</h2>
+                        <p>{move || profile.get().handle()}</p>
+                        <div class="account-meta">
+                            <span class="pill">{move || profile.get().id.clone().unwrap_or_default()}</span>
                         </div>
                     </div>
-                </div>
-
-                <div class="card control-card">
-                    <h2>"Engine"</h2>
-                    <p class="muted">"The Rust engine keeps your presence alive while the app is open."</p>
-                    <div class="status-line">
-                        <i class="status-dot" class:online=move || connected.get() class:pending=move || running.get() && !connected.get()></i>
-                        <div>
-                            <strong>{move || if !running.get() { "Stopped" } else if connected.get() { "Connected" } else { "Connecting" }}</strong>
-                            <span>{move || if connected.get() { "Presence is being maintained" } else if running.get() { "Retrying the Discord gateway" } else { "Press Start to connect" }}</span>
-                        </div>
-                    </div>
-                    <div class="button-row">
-                        <button
-                            class="button primary"
-                            disabled=move || running.get()
-                            on:click=move |event| on_start(event)
-                        >
-                            {icon::play()}"Start"
-                        </button>
-                        <button
-                            class="button danger"
-                            disabled=move || !running.get()
-                            on:click=move |event| on_stop(event)
-                        >
-                            {icon::stop()}"Stop"
-                        </button>
-                        <button class="button secondary" on:click=move |event| on_restart(event)>
-                            {icon::restart()}"Restart"
-                        </button>
-                    </div>
-                    <button class="link-button" on:click=move |event| on_open_logs(event)>
-                        "Open live logs" {icon::external()}
-                    </button>
-                    <Show when=move || !message.get().is_empty() fallback=|| ()>
-                        <p class="message">{move || message.get()}</p>
-                    </Show>
                 </div>
             </div>
         </div>
@@ -1198,34 +1011,6 @@ fn HypeSquadPage(token: String) -> impl IntoView {
             }>
                 <div class="card"><p class="muted">"Loading HypeSquad status…"</p></div>
             </Show>
-        </div>
-    }
-}
-
-// ------------------------------------------------------------------ logs
-
-#[component]
-fn LogsPage(
-    log: RwSignal<String>,
-    running: RwSignal<bool>,
-    live: RwSignal<bool>,
-    log_box: NodeRef<leptos::html::Pre>,
-    on_clear: impl Fn(MouseEvent) + 'static + Copy + Send + Sync,
-) -> impl IntoView {
-    view! {
-        <div class="fade-in logs-page">
-            <PageHeader title="Logs" subtitle="Live output from the Rust gateway engine.">
-                <div class="button-row">
-                    <span class="live-badge" class:live=move || live.get() && running.get()>
-                        <i></i>{move || if running.get() { "Live" } else { "Idle" }}
-                    </span>
-                    <button class="button ghost small" on:click=move |event| on_clear(event)>{icon::trash()}"Clear"</button>
-                </div>
-            </PageHeader>
-            <pre class="log-box main-log" node_ref=log_box>{move || {
-                let value = log.get();
-                if value.is_empty() { "No log lines yet — press Start on the Dashboard.".to_string() } else { value }
-            }}</pre>
         </div>
     }
 }

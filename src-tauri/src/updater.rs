@@ -9,7 +9,7 @@ use std::sync::Mutex;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use serde::{Deserialize, Serialize};
-use tauri::{AppHandle, Emitter, State};
+use tauri::{AppHandle, Emitter};
 
 #[cfg(windows)]
 use std::os::windows::process::CommandExt;
@@ -63,7 +63,7 @@ struct Asset {
 /// Repository that hosts the release feed. `UPDATE_REPO` in `.env`
 /// (`owner/repository`) overrides the built-in default.
 async fn update_repo() -> String {
-    let configured = crate::bot::app_config()
+    let configured = crate::config::app_config()
         .await
         .get("UPDATE_REPO")
         .cloned()
@@ -155,22 +155,16 @@ pub async fn check_update() -> Result<UpdateInfo, String> {
 /// Download the newest package, replace this install in place and restart.
 /// Progress arrives through the `update-progress` event.
 #[tauri::command]
-pub async fn download_update(
-    app: AppHandle,
-    state: State<'_, crate::bot::BotState>,
-) -> Result<(), String> {
+pub async fn download_update(app: AppHandle) -> Result<(), String> {
     if DOWNLOADING.swap(true, Ordering::SeqCst) {
         return Err("an update download is already running".into());
     }
-    let outcome = download_inner(&app, &state).await;
+    let outcome = download_inner(&app).await;
     DOWNLOADING.store(false, Ordering::SeqCst);
     outcome
 }
 
-async fn download_inner(
-    app: &AppHandle,
-    state: &crate::bot::BotState,
-) -> Result<(), String> {
+async fn download_inner(app: &AppHandle) -> Result<(), String> {
     let repo = update_repo().await;
     let client = client()?;
     let release = fetch_release(&client, &repo).await?;
@@ -242,7 +236,7 @@ async fn download_inner(
     drop(file);
 
     emit_progress(app, "installing", data.len() as u64, total, 100);
-    let installed = stage_and_install(&package, &directory, state).await;
+    let installed = stage_and_install(&package, &directory).await;
     let _ = std::fs::remove_dir_all(&directory);
     let exe = installed?;
     relaunch_after_exit(&exe)?;
@@ -250,11 +244,7 @@ async fn download_inner(
     Ok(())
 }
 
-async fn stage_and_install(
-    zip: &Path,
-    directory: &Path,
-    state: &crate::bot::BotState,
-) -> Result<PathBuf, String> {
+async fn stage_and_install(zip: &Path, directory: &Path) -> Result<PathBuf, String> {
     extract_package(zip, directory)?;
 
     let new_app = directory.join(APP_EXE);
@@ -262,7 +252,6 @@ async fn stage_and_install(
         return Err("the update package is missing the app executable".into());
     }
 
-    crate::bot::kill_child(state).await;
     install_in_place(&new_app)
 }
 

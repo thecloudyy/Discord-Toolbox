@@ -380,11 +380,6 @@ button:disabled {
   grid-template-columns: repeat(2, minmax(0, 1fr));
 }
 
-.dashboard-grid {
-  grid-template-columns: minmax(0, 1.55fr) minmax(0, 1fr);
-  align-items: start;
-}
-
 .card {
   border: 1px solid var(--border);
   border-radius: 16px;
@@ -954,11 +949,6 @@ select.input {
   margin-top: 8px;
 }
 
-.control-card {
-  display: flex;
-  flex-direction: column;
-}
-
 .status-line {
   display: flex;
   align-items: center;
@@ -1037,20 +1027,6 @@ select.input {
 
 .badge-log {
   min-height: 190px;
-}
-
-.logs-page {
-  display: flex;
-  min-height: 0;
-  flex: 1;
-  flex-direction: column;
-}
-
-.main-log {
-  flex: 1;
-  min-height: 320px;
-  max-height: none;
-  margin: 0;
 }
 
 /* ------------------------------------------------------------------ modal */
@@ -1294,8 +1270,7 @@ select.input {
 }
 
 @media (max-width: 900px) {
-  .grid.two,
-  .dashboard-grid {
+  .grid.two {
     grid-template-columns: minmax(0, 1fr);
   }
 

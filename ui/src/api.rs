@@ -54,31 +54,6 @@ pub async fn scan_tokens() -> Result<ScanReport, String> {
     typed("scan_tokens", json!({})).await
 }
 
-pub async fn start_bot() -> Result<(), String> {
-    call("start_bot", json!({})).await.map(|_| ())
-}
-
-pub async fn restart_bot() -> Result<(), String> {
-    call("restart_bot", json!({})).await.map(|_| ())
-}
-
-pub async fn stop_bot() -> Result<(), String> {
-    call("stop_bot", json!({})).await.map(|_| ())
-}
-
-pub async fn bot_status() -> BotStatus {
-    typed("bot_status", json!({})).await.unwrap_or_default()
-}
-
-pub async fn bot_logs(after: u64) -> (String, u64) {
-    let value = call("bot_logs", json!({ "after": after })).await.unwrap_or(Value::Null);
-    read_log_chunk(value, after)
-}
-
-pub async fn clear_bot_logs() {
-    let _ = call("clear_bot_logs", json!({})).await;
-}
-
 pub async fn badge_status() -> BadgeStatus {
     typed("badge_status", json!({})).await.unwrap_or_default()
 }

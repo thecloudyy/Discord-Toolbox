@@ -27,16 +27,6 @@ pub struct ScanReport {
 }
 
 #[derive(Clone, Debug, Default, Deserialize)]
-pub struct BotStatus {
-    #[serde(default)]
-    pub running: bool,
-    #[serde(default)]
-    pub connected: bool,
-    pub pid: Option<u32>,
-    pub user: Option<Profile>,
-}
-
-#[derive(Clone, Debug, Default, Deserialize)]
 pub struct BadgeStatus {
     #[serde(default)]
     pub running: bool,

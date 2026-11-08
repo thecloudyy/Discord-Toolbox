@@ -4,7 +4,7 @@
 //! batches the desktop client sends to Discord's science endpoint: a launch
 //! event plus an initial/final heartbeat per game, all tied to one session id.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -48,11 +48,18 @@ const DISCORD_EPOCH_MS: u64 = 1_420_070_400_000;
 /// Pause between full forge passes so repeated runs do not hammer the API.
 const LOOP_PAUSE_MS: u64 = 5_000;
 
+/// Incremental log lines retained for the badge console.
+#[derive(Default)]
+pub struct LogStore {
+    pub seq: u64,
+    pub lines: VecDeque<String>,
+}
+
 /// Forge run state shared with the UI.
 pub struct BadgeState {
     running: Arc<AtomicBool>,
     cancel: Arc<AtomicBool>,
-    logs: Arc<Mutex<crate::engine::LogStore>>,
+    logs: Arc<Mutex<LogStore>>,
     last: Arc<Mutex<Value>>,
 }
 
@@ -61,7 +68,7 @@ impl BadgeState {
         Self {
             running: Arc::new(AtomicBool::new(false)),
             cancel: Arc::new(AtomicBool::new(false)),
-            logs: Arc::new(Mutex::new(crate::engine::LogStore::default())),
+            logs: Arc::new(Mutex::new(LogStore::default())),
             last: Arc::new(Mutex::new(json!({ "running": false }))),
         }
     }
@@ -312,7 +319,7 @@ pub(crate) async fn resolve_token(token: &str) -> Result<String, String> {
     if !direct.is_empty() {
         return Ok(direct.to_string());
     }
-    let stored = crate::bot::app_config()
+    let stored = crate::config::app_config()
         .await
         .get("DISCORD_TOKEN")
         .cloned()
@@ -633,7 +640,7 @@ async fn fetch_catalog(client: &reqwest::Client) -> Result<Vec<Game>, String> {
 /// Claimed game ids survive across runs so every forge picks games the account
 /// has not been credited for yet.
 fn badge_games_path() -> PathBuf {
-    crate::bot::config_dir().join(".badge-games.json")
+    crate::config::config_dir().join(".badge-games.json")
 }
 
 fn load_used_games() -> Vec<String> {
@@ -1032,7 +1039,7 @@ fn encode_super_props(properties: &Value) -> String {
 /// Cookie header for the telemetry requests: an explicit value from the app
 /// config first, otherwise the one stored by the local Discord client.
 async fn resolve_cookie() -> Result<String, String> {
-    let configured = crate::bot::app_config()
+    let configured = crate::config::app_config()
         .await
         .get("DISCORD_COOKIE")
         .cloned()

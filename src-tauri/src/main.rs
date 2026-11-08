@@ -4,15 +4,13 @@
 )]
 
 mod badges;
-mod bot;
-mod engine;
+mod config;
 mod hypesquad;
 mod processes;
 mod token_extract;
 mod updater;
 
 use badges::BadgeState;
-use bot::BotState;
 use tauri::Manager;
 
 #[tauri::command]
@@ -113,21 +111,14 @@ fn main() {
     let app = tauri::Builder::default()
         .setup(|app| {
             updater::cleanup_stale_files();
-            app.manage(BotState::new());
             app.manage(BadgeState::new());
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
-            bot::app_config,
-            bot::write_env_multi,
-            bot::account_profile,
-            bot::scan_tokens,
-            bot::start_bot,
-            bot::restart_bot,
-            bot::stop_bot,
-            bot::bot_status,
-            bot::bot_logs,
-            bot::clear_bot_logs,
+            config::app_config,
+            config::write_env_multi,
+            config::account_profile,
+            config::scan_tokens,
             window_minimize,
             window_toggle_maximize,
             window_close,

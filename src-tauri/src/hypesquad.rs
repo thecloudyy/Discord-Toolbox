@@ -336,7 +336,7 @@ mod tests {
     fn reads_live_hypesquad_status() {
         let runtime = tokio::runtime::Runtime::new().unwrap();
         runtime.block_on(async {
-            let token = crate::bot::app_config()
+            let token = crate::config::app_config()
                 .await
                 .get("DISCORD_TOKEN")
                 .cloned()

@@ -12,6 +12,8 @@ enum Tab {
     Dashboard,
     Badges,
     HypeSquad,
+    FriendCodes,
+    VoiceFollow,
 }
 
 impl Tab {
@@ -20,6 +22,8 @@ impl Tab {
             Tab::Dashboard => "Dashboard",
             Tab::Badges => "Game badges",
             Tab::HypeSquad => "HypeSquad",
+            Tab::FriendCodes => "Friend codes",
+            Tab::VoiceFollow => "Voice follow",
         }
     }
 }
@@ -386,6 +390,12 @@ pub fn App() -> impl IntoView {
                                     Tab::HypeSquad => view! {
                                         <HypeSquadPage token=cfg.get_untracked().value("DISCORD_TOKEN") />
                                     }.into_any(),
+                                    Tab::FriendCodes => view! {
+                                        <FriendCodesPage cfg=cfg />
+                                    }.into_any(),
+                                    Tab::VoiceFollow => view! {
+                                        <VoiceFollowPage cfg=cfg />
+                                    }.into_any(),
                                     Tab::Dashboard => view! {
                                         <Dashboard
                                             profile=profile
@@ -445,6 +455,8 @@ fn Rail(
         (Tab::Dashboard, "Dashboard", "dashboard"),
         (Tab::Badges, "Game badges", "badges"),
         (Tab::HypeSquad, "HypeSquad", "hypesquad"),
+        (Tab::FriendCodes, "Friend codes", "friend"),
+        (Tab::VoiceFollow, "Voice follow", "voice"),
     ];
 
     view! {
@@ -463,6 +475,8 @@ fn Rail(
                         let icon_view = match icon_name {
                             "badges" => icon::badges().into_any(),
                             "hypesquad" => icon::hypesquad().into_any(),
+                            "friend" => icon::friend().into_any(),
+                            "voice" => icon::voice().into_any(),
                             _ => icon::dashboard().into_any(),
                         };
                         view! {
@@ -1049,10 +1063,275 @@ fn HypeSquadPage(token: String) -> impl IntoView {
     }
 }
 
+// ------------------------------------------------------------------ friend codes
+
+#[component]
+fn FriendCodesPage(cfg: RwSignal<Config>) -> impl IntoView {
+    let codes = RwSignal::new(Vec::<FriendCode>::new());
+    let loading = RwSignal::new(false);
+    let message = RwSignal::new(String::new());
+
+    let token = move || cfg.get_untracked().value("DISCORD_TOKEN");
+
+    let refresh = move || {
+        loading.set(true);
+        message.set(String::new());
+        let token = token();
+        spawn_local(async move {
+            match api::friend_codes_list(token).await {
+                Ok(list) => codes.set(list),
+                Err(error) => message.set(error),
+            }
+            loading.set(false);
+        });
+    };
+
+    let create = move |_| {
+        loading.set(true);
+        message.set(String::new());
+        let token = token();
+        spawn_local(async move {
+            match api::friend_code_create(token.clone()).await {
+                Ok(code) => {
+                    codes.update(|list| list.push(code));
+                }
+                Err(error) => message.set(error),
+            }
+            loading.set(false);
+            refresh();
+        });
+    };
+
+    let revoke = move |_| {
+        loading.set(true);
+        message.set(String::new());
+        let token = token();
+        spawn_local(async move {
+            match api::friend_code_revoke_all(token.clone()).await {
+                Ok(()) => {
+                    codes.set(Vec::new());
+                    message.set("All friend codes revoked".into());
+                }
+                Err(error) => message.set(error),
+            }
+            loading.set(false);
+            refresh();
+        });
+    };
+
+    refresh();
+
+    let not_loading = move || !loading.get();
+    let codes_empty = move || codes.get().is_empty();
+    let message_nonempty = move || !message.get().is_empty();
+
+    view! {
+        <div class="fade-in">
+            <PageHeader
+                title="Friend codes"
+                subtitle="Generate shareable codes so friends can add you easily."
+            />
+            <div class="grid two">
+                <div class="card">
+                    <h2>"Your friend codes"</h2>
+                    <Show when=move || loading.get()>
+                        <div class="card"><p class="muted">"Loading friend codes…"</p></div>
+                    </Show>
+                    <Show when=move || not_loading() && codes_empty()>
+                        <div class="empty">
+                            <p>"You don't have any friend codes yet."</p>
+                            <span>"Create one below to share with friends."</span>
+                        </div>
+                    </Show>
+                    <Show when=move || not_loading() && !codes_empty()>
+                        <div class="account-list">
+                            <For
+                                each=move || codes.get()
+                                key=|code| code.code.clone()
+                                children=move |code| {
+                                    view! {
+                                        <div class="account-row">
+                                            <div class="account-row-text">
+                                                <strong>{code.code.clone()}</strong>
+                                                <span>{format!("uses {} of {}", code.uses, code.max_uses.map(|v| v.to_string()).unwrap_or_else(|| "∞".into()))}</span>
+                                            </div>
+                                            <button
+                                                class="button ghost small"
+                                                title="Copy invite link"
+                                                on:click=move |_| {
+                                                    let link = format!("https://discord.gg/{}", code.code);
+                                                    let message = message;
+                                                    spawn_local(async move {
+                                                        if api::copy_text(link).await.is_ok() {
+                                                            message.set("Invite link copied".into());
+                                                        }
+                                                    });
+                                                }
+                                            >{icon::copy()}"Copy link"</button>
+                                        </div>
+                                    }
+                                }
+                            />
+                        </div>
+                        <Show when=message_nonempty fallback=|| ()>
+                            <p class="message">{move || message.get()}</p>
+                        </Show>
+                    </Show>
+                    <div class="button-row">
+                        <button
+                            class="button primary"
+                            disabled=move || loading.get()
+                            on:click=create
+                        >
+                            {icon::friend()}"Create friend code"
+                        </button>
+                        <button
+                            class="button danger"
+                            disabled=move || loading.get() || codes.get().is_empty()
+                            on:click=revoke
+                        >
+                            {icon::trash()}"Revoke all"
+                        </button>
+                    </div>
+                </div>
+                <div class="card">
+                    <h2>"How it works"</h2>
+                    <p class="muted">
+                        "Each code creates a discord.gg invite link you can paste to a friend. "
+                        "Codes are stored locally on this PC."
+                    </p>
+                    <p class="fine-print">
+                        "Real Discord friend codes are created inside the Discord client; "
+                        "this standalone tool stores and shares codes locally and cannot write "
+                        "to Discord's friend-code service."
+                    </p>
+                </div>
+            </div>
+        </div>
+    }
+}
+
+// ------------------------------------------------------------------ voice follow
+
+#[component]
+fn VoiceFollowPage(cfg: RwSignal<Config>) -> impl IntoView {
+    let follow = RwSignal::new(None::<VoiceFollow>);
+    let user_id = RwSignal::new(String::new());
+    let loading = RwSignal::new(false);
+    let message = RwSignal::new(String::new());
+
+    let token = move || cfg.get_untracked().value("DISCORD_TOKEN");
+
+    let refresh = move || {
+        loading.set(true);
+        message.set(String::new());
+        let token = token();
+        spawn_local(async move {
+            match api::voice_follow_status(token).await {
+                Ok(status) => follow.set(status),
+                Err(error) => message.set(error),
+            }
+            loading.set(false);
+        });
+    };
+
+    let set_follow = move |follow_now: bool| {
+        loading.set(true);
+        message.set(String::new());
+        let token = token();
+        let id = user_id.get_untracked().trim().to_string();
+        if follow_now && id.is_empty() {
+            loading.set(false);
+            message.set("Enter a friend's Discord user ID first.".into());
+            return;
+        }
+        let username = follow
+            .get_untracked()
+            .as_ref()
+            .map(|f| f.username.clone())
+            .unwrap_or_default();
+        spawn_local(async move {
+            match api::voice_follow_set(token.clone(), id.clone(), username, follow_now).await {
+                Ok(status) => follow.set(status),
+                Err(error) => message.set(error),
+            }
+            loading.set(false);
+        });
+    };
+
+    refresh();
+
+    view! {
+        <div class="fade-in">
+            <PageHeader
+                title="Voice follow"
+                subtitle="Follow a friend from your friends list into voice chat."
+            />
+            <div class="grid two">
+                <div class="card">
+                    <h2>"Follow a friend"</h2>
+                    <Field label="Friend's user ID" hint="Right-click their name in Discord and copy User ID.">
+                        <input
+                            class="input"
+                            prop:value=move || user_id.get()
+                            on:input=move |event| user_id.set(event_value(&event))
+                        />
+                    </Field>
+                    <Show
+                        when=move || follow.get().map(|f| f.following).unwrap_or(false)
+                        fallback=move || view! {
+                            <button
+                                class="button primary"
+                                disabled=move || loading.get() || user_id.get().trim().is_empty()
+                                on:click=move |_| set_follow(true)
+                            >{icon::voice()}"Start following"</button>
+                        }
+                    >
+                        <div class="button-row end">
+                            <button
+                                class="button secondary"
+                                disabled=move || loading.get()
+                                on:click=move |_| set_follow(false)
+                            >"Stop following"</button>
+                        </div>
+                    </Show>
+                    <Show when=move || !message.get().is_empty() fallback=|| ()>
+                        <p class="message error">{move || message.get()}</p>
+                    </Show>
+                </div>
+                <div class="card">
+                    <h2>"Current follow"</h2>
+                    <Show
+                        when=move || follow.get().is_some()
+                        fallback=move || view! {
+                            <div class="empty">
+                                <p>"No voice follow is active."</p>
+                            </div>
+                        }
+                    >
+                        <div class="account-row">
+                            <Avatar profile=RwSignal::new(Profile::default()) size=34 />
+                            <div class="account-row-text">
+                                <strong>{move || follow.get().as_ref().map(|f| f.username.clone()).unwrap_or_default()}</strong>
+                                <span>{move || follow.get().as_ref().map(|f| f.user_id.clone()).unwrap_or_default()}</span>
+                            </div>
+                            <span class="pill">{move || if follow.get().as_ref().map(|f| f.following).unwrap_or(false) { "Following" } else { "Stopped" }}</span>
+                        </div>
+                        <p class="fine-print">
+                            "Voice following changes your Discord voice channel when the followed friend moves. "
+                            "This requires Discord's client voice API, so a standalone tool can only track the followed user locally."
+                        </p>
+                    </Show>
+                </div>
+            </div>
+        </div>
+    }
+}
+
 // ------------------------------------------------------------------ update
 
 #[component]
-fn UpdateBanner(
+fn UpdateBanner (
     update: RwSignal<Option<UpdateInfo>>,
     progress: RwSignal<Option<UpdateProgress>>,
     error: RwSignal<String>,

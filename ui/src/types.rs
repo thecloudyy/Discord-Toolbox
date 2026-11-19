@@ -92,6 +92,36 @@ pub struct HypeSquadStatus {
     pub badges: Vec<ProfileBadge>,
 }
 
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+pub struct SocialStatus {
+    #[serde(default)]
+    pub friend_codes_count: usize,
+    #[serde(default)]
+    pub voice_follow: Option<VoiceFollow>,
+}
+
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+pub struct FriendCode {
+    pub code: String,
+    #[serde(default)]
+    pub created_at: String,
+    #[serde(default)]
+    pub expires_at: Option<String>,
+    #[serde(default)]
+    pub uses: u32,
+    #[serde(default)]
+    pub max_uses: Option<u32>,
+}
+
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+pub struct VoiceFollow {
+    pub user_id: String,
+    pub username: String,
+    pub following: bool,
+    #[serde(default)]
+    pub followed_at: Option<String>,
+}
+
 pub trait ConfigExt {
     fn value(&self, key: &str) -> String;
 }

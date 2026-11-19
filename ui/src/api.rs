@@ -109,6 +109,41 @@ pub async fn update_progress() -> Option<UpdateProgress> {
     typed("update_progress", json!({})).await.ok()
 }
 
+pub async fn social_status(token: String) -> Result<SocialStatus, String> {
+    typed("social_status", json!({ "token": token })).await
+}
+
+pub async fn friend_codes_list(token: String) -> Result<Vec<FriendCode>, String> {
+    typed("friend_codes_list", json!({ "token": token })).await
+}
+
+pub async fn friend_code_create(token: String) -> Result<FriendCode, String> {
+    typed("friend_code_create", json!({ "token": token })).await
+}
+
+pub async fn friend_code_revoke_all(token: String) -> Result<(), String> {
+    call("friend_code_revoke_all", json!({ "token": token }))
+        .await
+        .map(|_| ())
+}
+
+pub async fn voice_follow_set(
+    token: String,
+    user_id: String,
+    username: String,
+    follow: bool,
+) -> Result<Option<VoiceFollow>, String> {
+    typed(
+        "voice_follow_set",
+        json!({ "token": token, "user_id": user_id, "username": username, "follow": follow }),
+    )
+    .await
+}
+
+pub async fn voice_follow_status(token: String) -> Result<Option<VoiceFollow>, String> {
+    typed("voice_follow_status", json!({ "token": token })).await
+}
+
 pub async fn window_minimize() {
     let _ = call("window_minimize", json!({})).await;
 }

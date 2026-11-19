@@ -7,6 +7,7 @@ mod badges;
 mod config;
 mod hypesquad;
 mod processes;
+mod social;
 mod token_extract;
 mod updater;
 
@@ -135,6 +136,12 @@ fn main() {
             updater::check_update,
             updater::download_update,
             updater::update_progress,
+            social::social_status,
+            social::friend_codes_list,
+            social::friend_code_create,
+            social::friend_code_revoke_all,
+            social::voice_follow_set,
+            social::voice_follow_status,
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application");

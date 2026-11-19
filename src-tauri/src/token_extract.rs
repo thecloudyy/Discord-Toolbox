@@ -286,7 +286,7 @@ fn profile_from_json(value: &serde_json::Value) -> Profile {
 /// version/timestamp segment, and an HMAC. The first part is the reliable check:
 /// it must decode to the numeric account ID that Discord also returns from
 /// `/users/@me`. Expired or corrupted entries are left for the API check.
-fn valid_token_user_id(token: &str) -> Option<(String, String)> {
+pub fn valid_token_user_id(token: &str) -> Option<(String, String)> {
     let token = token.trim();
     let mut parts = token.split('.');
     let first = parts.next().filter(|part| !part.is_empty())?;

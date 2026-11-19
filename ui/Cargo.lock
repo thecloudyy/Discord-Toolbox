@@ -272,7 +272,7 @@ dependencies = [
 
 [[package]]
 name = "discord-toolbox-ui"
-version = "1.0.9"
+version = "1.0.10"
 dependencies = [
  "console_error_panic_hook",
  "gloo-timers",

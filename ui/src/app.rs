@@ -156,7 +156,41 @@ pub fn App() -> impl IntoView {
             } else {
                 selected.set(true);
                 match api::account_profile(token).await {
+                    Ok(me) if me.bot => {
+                        selected.set(false);
+                        profile.set(Profile::default());
+                        set_value(cfg, "DISCORD_TOKEN", String::new());
+                        save_config(cfg);
+                        msg.set("This is a bot token, not a Discord user account".into());
+                    }
                     Ok(me) => profile.set(me),
+                    Err(error)
+                        if error.contains("Discord rejected")
+                            || error.contains("does not look like")
+                            || error.contains("does not match") =>
+                    {
+                        selected.set(false);
+                        profile.set(Profile::default());
+                        set_value(cfg, "DISCORD_TOKEN", String::new());
+                        save_config(cfg);
+                        msg.set(format!("Saved token was not valid: {error}"));
+                        detecting.set(true);
+                        match api::scan_tokens().await {
+                            Ok(report) => {
+                                tokens.set(report.accounts.clone());
+                                notes.set(report.notes);
+                                if report.accounts.len() == 1 {
+                                    let account = report.accounts[0].clone();
+                                    profile.set(account.profile.clone());
+                                    selected.set(true);
+                                    set_value(cfg, "DISCORD_TOKEN", account.token.clone());
+                                    save_config(cfg);
+                                }
+                            }
+                            Err(scan_error) => notes.set(vec![scan_error]),
+                        }
+                        detecting.set(false);
+                    }
                     Err(error) => msg.set(format!("Saved token could not be verified: {error}")),
                 }
             }
@@ -522,10 +556,10 @@ fn LoginPanel(
     view! {
         <div class="fade-in login">
             <div class="login-orb"></div>
-            <PageHeader
-                title="Connect your account"
-                subtitle="Discord Toolbox keeps your account online without touching your password. Tokens stay on this computer."
-            />
+                            <PageHeader
+                    title="Connect your account"
+                    subtitle="Discord Toolbox checks your token against Discord. Your token stays on this computer."
+                />
             <div class="grid two">
                 <div class="card login-card">
                     <div class="card-heading">
@@ -540,8 +574,8 @@ fn LoginPanel(
                     </div>
                     <Show when=move || !tokens.get().is_empty() fallback=move || view! {
                         <div class="empty">
-                            <p>"No local Discord tokens were found."</p>
-                            <span>"Sign in to the Discord desktop app, or paste a token below."</span>
+                            <p>"No verified Discord accounts were found."</p>
+                            <span>"Sign in to Discord and scan again, or paste a token below."</span>
                         </div>
                     }>
                         <div class="account-list">

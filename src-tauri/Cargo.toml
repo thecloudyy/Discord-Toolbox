@@ -1,6 +1,6 @@
 [package]
 name = "discord-toolbox"
-version = "1.0.9"
+version = "1.0.10"
 edition = "2021"
 description = "Discord Toolbox — keep-online and game badge tooling for Discord."
 license = "MIT"

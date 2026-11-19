@@ -8,6 +8,8 @@ pub struct Profile {
     pub username: Option<String>,
     pub global_name: Option<String>,
     pub avatar_url: Option<String>,
+    #[serde(default)]
+    pub bot: bool,
 }
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]

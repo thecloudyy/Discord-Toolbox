@@ -8,7 +8,10 @@
 
 use std::time::Duration;
 
-use base64::{engine::general_purpose::STANDARD as BASE64, Engine};
+use base64::{
+    engine::general_purpose::{URL_SAFE_NO_PAD as URL_SAFE, STANDARD as BASE64},
+    Engine,
+};
 use serde::Serialize;
 
 #[cfg(target_os = "windows")]
@@ -36,6 +39,8 @@ pub struct Profile {
     pub username: Option<String>,
     pub global_name: Option<String>,
     pub avatar_url: Option<String>,
+    #[serde(default, skip_serializing)]
+    pub bot: bool,
 }
 
 #[derive(Debug, Serialize)]
@@ -72,30 +77,60 @@ pub async fn scan_with_profiles() -> ScanReport {
     };
 
     let mut seen_ids: Vec<String> = Vec::new();
+    let mut stale_tokens = 0usize;
     for (label, token) in found {
+        let Some(token) = valid_token_user_id(&token) else {
+            notes.push(format!("{label}: found a saved token that is not a valid Discord session token"));
+            continue;
+        };
+        let token_id = token.0;
+        let token = token.1;
         let profile = match fetch_profile_with(&client, &token).await {
             Ok(profile) => profile,
             Err(error) => {
-                notes.push(format!(
-                    "{label}: token found, but the profile lookup failed ({error})"
-                ));
+                if error.invalid_session {
+                    stale_tokens += 1;
+                } else {
+                    notes.push(format!(
+                        "{label}: profile lookup could not confirm the token ({})",
+                        error.message
+                    ));
+                }
                 continue;
             }
         };
-        if let Some(id) = profile.id.as_deref() {
-            if seen_ids.iter().any(|seen| seen == id) {
-                continue;
-            }
-            seen_ids.push(id.to_string());
+        if profile.bot {
+            notes.push(format!("{label}: this is a bot token, not a user account"));
+            continue;
         }
+        let Some(id) = profile.id.clone() else {
+            notes.push(format!("{label}: Discord returned a profile without an account ID"));
+            continue;
+        };
+        if !token_id.is_empty() && token_id != id {
+            notes.push(format!(
+                "{label}: the saved session does not belong to the profile Discord returned"
+            ));
+            continue;
+        }
+        if seen_ids.iter().any(|seen| seen == &id) {
+            continue;
+        }
+        seen_ids.push(id);
         accounts.push(DetectedAccount { client: label, token, profile });
     }
 
     if accounts.is_empty() {
-        notes.push(
-            "No saved account could be verified with Discord. Sign in to Discord, then detect again."
-                .to_string(),
-        );
+        if stale_tokens > 0 {
+            notes.push(
+                "The Discord client has only expired or revoked sessions. Sign in again, then detect."
+                    .to_string(),
+            );
+        } else {
+            notes.push(
+                "No valid Discord account was found. Sign in to Discord, then detect again.".to_string(),
+            );
+        }
     }
 
     ScanReport { accounts, notes }
@@ -103,8 +138,24 @@ pub async fn scan_with_profiles() -> ScanReport {
 
 /// Fetch `GET /users/@me` for a token.
 pub async fn fetch_profile(token: &str) -> Result<Profile, String> {
+    let (embedded_id, token) = valid_token_user_id(token).ok_or_else(|| {
+        "This does not look like a valid Discord user token. Copy the whole token from Discord and try again."
+            .to_string()
+    })?;
     let client = build_http_client()?;
-    fetch_profile_with(&client, token).await
+    let me = fetch_profile_with(&client, &token)
+        .await
+        .map_err(|error| error.message)?;
+    if me.bot {
+        return Err("This is a bot token, not a user account token".into());
+    }
+    let Some(id) = me.id.clone() else {
+        return Err("Discord did not return an account ID for this token".into());
+    };
+    if !embedded_id.is_empty() && embedded_id != id {
+        return Err("The token does not match the Discord account it belongs to".into());
+    }
+    Ok(me)
 }
 
 fn build_http_client() -> Result<reqwest::Client, String> {
@@ -118,23 +169,32 @@ fn build_http_client() -> Result<reqwest::Client, String> {
 struct ProfileError {
     message: String,
     retryable: bool,
+    invalid_session: bool,
 }
 
-async fn fetch_profile_with(client: &reqwest::Client, token: &str) -> Result<Profile, String> {
-    let mut last_message = String::from("profile lookup failed");
+async fn fetch_profile_with(
+    client: &reqwest::Client,
+    token: &str,
+) -> Result<Profile, ProfileError> {
+    let mut last_error = ProfileError {
+        message: "profile lookup failed".to_string(),
+        retryable: false,
+        invalid_session: false,
+    };
     for attempt in 0..3u32 {
         match fetch_profile_once(client, token).await {
             Ok(profile) => return Ok(profile),
             Err(error) => {
-                last_message = error.message;
-                if !error.retryable || attempt == 2 {
+                let retry = error.retryable && attempt < 2;
+                last_error = error;
+                if !retry {
                     break;
                 }
                 tokio::time::sleep(Duration::from_millis(700 * u64::from(attempt + 1))).await;
             }
         }
     }
-    Err(last_message)
+    Err(last_error)
 }
 
 async fn fetch_profile_once(client: &reqwest::Client, token: &str) -> Result<Profile, ProfileError> {
@@ -146,6 +206,7 @@ async fn fetch_profile_once(client: &reqwest::Client, token: &str) -> Result<Pro
         .map_err(|error| ProfileError {
             message: format!("network error: {error}"),
             retryable: true,
+            invalid_session: false,
         })?;
 
     let status = response.status();
@@ -153,20 +214,31 @@ async fn fetch_profile_once(client: &reqwest::Client, token: &str) -> Result<Pro
         return Err(ProfileError {
             message: "Discord rejected this token".to_string(),
             retryable: false,
+            invalid_session: true,
         });
     }
     if !status.is_success() {
         return Err(ProfileError {
             message: format!("Discord replied with HTTP {}", status.as_u16()),
             retryable: status.as_u16() == 429 || status.is_server_error(),
+            invalid_session: false,
         });
     }
 
     let body: serde_json::Value = response.json().await.map_err(|error| ProfileError {
         message: format!("could not read Discord's response: {error}"),
         retryable: true,
+        invalid_session: false,
     })?;
-    Ok(profile_from_json(&body))
+    let profile = profile_from_json(&body);
+    if profile.id.as_deref().is_some_and(str::is_empty) {
+        return Err(ProfileError {
+            message: "Discord returned a profile without an account ID".to_string(),
+            retryable: false,
+            invalid_session: true,
+        });
+    }
+    Ok(profile)
 }
 
 fn profile_from_json(value: &serde_json::Value) -> Profile {
@@ -182,6 +254,7 @@ fn profile_from_json(value: &serde_json::Value) -> Profile {
     let global_name = value
         .get("global_name")
         .and_then(|field| field.as_str())
+        .filter(|name| !name.is_empty())
         .map(str::to_string);
     let avatar = value
         .get("avatar")
@@ -205,7 +278,36 @@ fn profile_from_json(value: &serde_json::Value) -> Profile {
         username,
         global_name,
         avatar_url,
+        bot: value.get("bot").and_then(serde_json::Value::as_bool).unwrap_or(false),
     }
+}
+
+/// A Discord user token is three parts: the base64url-encoded user ID, a short
+/// version/timestamp segment, and an HMAC. The first part is the reliable check:
+/// it must decode to the numeric account ID that Discord also returns from
+/// `/users/@me`. Expired or corrupted entries are left for the API check.
+fn valid_token_user_id(token: &str) -> Option<(String, String)> {
+    let token = token.trim();
+    let mut parts = token.split('.');
+    let first = parts.next().filter(|part| !part.is_empty())?;
+    let second = parts.next().filter(|part| !part.is_empty())?;
+    let signature = parts.next().filter(|part| !part.is_empty())?;
+    let clean = |part: &str, min: usize, max: usize| {
+        (min..=max).contains(&part.len())
+            && part
+                .bytes()
+                .all(|byte| byte.is_ascii_alphanumeric() || byte == b'-' || byte == b'_')
+    };
+    if parts.next().is_some() || !clean(second, 4, 8) || !clean(signature, 24, 40) {
+        return None;
+    }
+
+    let id = String::from_utf8(URL_SAFE.decode(first).ok()?).ok()?;
+    if id.is_empty() || id.len() > 24 || !id.bytes().all(|byte| byte.is_ascii_digit()) {
+        return None;
+    }
+
+    Some((id, token.to_string()))
 }
 
 #[cfg(target_os = "windows")]
@@ -719,10 +821,7 @@ fn decrypt_token(payload: &[u8], key: &[u8]) -> Option<String> {
     let plaintext = cipher.decrypt(nonce, &payload[15..]).ok()?;
     let token = String::from_utf8(plaintext).ok()?;
 
-    let looks_like_token = token.len() >= 40
-        && token.len() <= 200
-        && token.chars().all(|character| character.is_ascii_graphic());
-    looks_like_token.then_some(token)
+    valid_token_user_id(&token).map(|_| token)
 }
 
 #[cfg(target_os = "windows")]
@@ -754,6 +853,54 @@ extern "system" {
 
 #[cfg(test)]
 mod tests {
+    fn user_token(id: &str) -> String {
+        use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine};
+        let first = URL_SAFE_NO_PAD.encode(id.as_bytes());
+        format!("{first}.{}.{}", "a".repeat(6), "b".repeat(27))
+    }
+
+    #[test]
+    fn accepts_a_real_discord_user_token_shape() {
+        let token = user_token("1526682077313896582");
+        let (id, checked) = super::valid_token_user_id(&token).expect("token");
+        assert_eq!(id, "1526682077313896582");
+        assert_eq!(checked, token);
+    }
+
+    #[test]
+    fn rejects_tokens_that_are_not_discord_sessions() {
+        let valid = user_token("1526682077313896582");
+        for bad in [
+            String::new(),
+            "not-a-token".to_string(),
+            "part1.part2".to_string(),
+            format!("{valid}.extra"),
+            format!("!!{valid}"),
+            format!("not-the-id.{}", valid.split('.').nth(1).unwrap_or_default()),
+            format!(
+                "{}.{}.{}",
+                valid.split('.').next().unwrap_or_default(),
+                "abc",
+                "b".repeat(27)
+            ),
+            valid[..valid.len() - 10].to_string(),
+        ] {
+            assert!(super::valid_token_user_id(&bad).is_none(), "accepted {bad:?}");
+        }
+    }
+
+    #[test]
+    fn profile_marks_bot_accounts() {
+        let profile = super::profile_from_json(&serde_json::json!({
+            "id": "123456789012345678",
+            "username": "helper",
+            "global_name": null,
+            "bot": true
+        }));
+        assert!(profile.bot);
+        assert_eq!(profile.id.as_deref(), Some("123456789012345678"));
+    }
+
     #[cfg(target_os = "windows")]
     #[test]
     fn decrypts_v10_cookie_blob() {
@@ -860,26 +1007,29 @@ mod tests {
     }
 
     /// Manual end-to-end check: detection plus the Discord profile lookup.
+    /// Prints account labels and whether a profile resolved, never tokens.
     #[test]
     #[ignore = "calls the Discord API with the token signed in on this machine"]
     fn resolves_local_account_profile() {
         let (tokens, _) = super::scan_local_profiles();
-        let Some((_, token)) = tokens.first() else {
+        if tokens.is_empty() {
             println!("no local account to resolve");
             return;
-        };
+        }
         let runtime = tokio::runtime::Builder::new_current_thread()
             .enable_all()
             .build()
             .expect("runtime");
-        match runtime.block_on(super::fetch_profile(token)) {
-            Ok(profile) => println!(
-                "profile lookup ok: id {}, username {}, avatar {}",
-                profile.id.is_some(),
-                profile.username.is_some(),
-                profile.avatar_url.is_some()
-            ),
-            Err(error) => println!("profile lookup failed: {error}"),
+        for (label, token) in tokens {
+            match runtime.block_on(super::fetch_profile(&token)) {
+                Ok(profile) => println!(
+                    "{label}: profile ok id={} username={} bot={}",
+                    profile.id.is_some(),
+                    profile.username.is_some(),
+                    profile.bot
+                ),
+                Err(error) => println!("{label}: profile lookup failed: {error}"),
+            }
         }
     }
 }

@@ -16,6 +16,7 @@ use crate::config::config_dir;
 
 const STATE_FILE: &str = ".social-state.json";
 const API_ME: &str = "https://discord.com/api/v9/users/@me";
+const API_USER: &str = "https://discord.com/api/v9/users/";
 const USER_AGENT: &str = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) discord/1.0.9253 Chrome/148.0.7778.280 Electron/42.7.1 Safari/537.36";
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
@@ -136,6 +137,23 @@ pub async fn voice_follow_set(
     let _ = resolve_user(&token).await?;
     let mut state = load_state();
     if follow {
+        let user_id = user_id.trim().to_string();
+        if user_id.is_empty() {
+            return Err("Enter a friend's Discord user ID first.".into());
+        }
+        if !is_snowflake(&user_id) {
+            return Err("That does not look like a Discord user ID.".into());
+        }
+        // Never store a stale username for a new follow: resolve the followed
+        // user's real name from Discord when none is provided.
+        let username = if username.trim().is_empty() {
+            lookup_user(&token, &user_id).await?
+        } else {
+            username.trim().to_string()
+        };
+        if username.is_empty() {
+            return Err("Could not resolve that user's name from Discord.".into());
+        }
         state.voice_follow = Some(VoiceFollow {
             user_id,
             username,
@@ -153,6 +171,48 @@ pub async fn voice_follow_set(
 pub async fn voice_follow_status(token: String) -> Result<Option<VoiceFollow>, String> {
     let _ = resolve_user(&token).await?;
     Ok(load_state().voice_follow)
+}
+
+/// Discord user IDs are numeric snowflakes.
+fn is_snowflake(text: &str) -> bool {
+    (17..=19).contains(&text.len()) && text.bytes().all(|byte| byte.is_ascii_digit())
+}
+
+/// Resolve a Discord user's username from `/users/{user_id}` so a voice follow
+/// is stored with a real name instead of a blank one.
+async fn lookup_user(token: &str, user_id: &str) -> Result<String, String> {
+    let client = reqwest::Client::builder()
+        .user_agent(USER_AGENT)
+        .timeout(std::time::Duration::from_secs(15))
+        .build()
+        .map_err(|e| format!("could not create HTTP client: {e}"))?;
+    let response = client
+        .get(format!("{API_USER}{user_id}"))
+        .header("authorization", token)
+        .send()
+        .await
+        .map_err(|e| format!("network error: {e}"))?;
+    if response.status().as_u16() == 401 || response.status().as_u16() == 403 {
+        return Err("Discord rejected the token".into());
+    }
+    if !response.status().is_success() {
+        return Err(format!(
+            "Discord replied with HTTP {}",
+            response.status().as_u16()
+        ));
+    }
+    let body: serde_json::Value = response
+        .json()
+        .await
+        .map_err(|e| format!("could not read Discord's response: {e}"))?;
+    let username = body
+        .get("username")
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or_default();
+    if username.is_empty() {
+        return Err("Discord did not return a username for that user ID".into());
+    }
+    Ok(username.to_string())
 }
 
 fn nanoid() -> String {

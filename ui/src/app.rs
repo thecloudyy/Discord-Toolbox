@@ -1245,11 +1245,9 @@ fn VoiceFollowPage(cfg: RwSignal<Config>) -> impl IntoView {
             message.set("Enter a friend's Discord user ID first.".into());
             return;
         }
-        let username = follow
-            .get_untracked()
-            .as_ref()
-            .map(|f| f.username.clone())
-            .unwrap_or_default();
+        // Never send a stale username: resolve the followed user's real name
+        // from Discord inside the command so a new follow is never nameless.
+        let username = String::new();
         spawn_local(async move {
             match api::voice_follow_set(token.clone(), id.clone(), username, follow_now).await {
                 Ok(status) => follow.set(status),

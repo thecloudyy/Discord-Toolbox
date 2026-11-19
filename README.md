@@ -13,6 +13,8 @@ Automating a user account is against Discord's ToS: use it at your own risk.
 - Single forge pass by default, with an optional loop that keeps forging until you press Stop
 - Live batch progress and a forge log inside the app
 - HypeSquad manager: switch house, attempt removal, and view profile badges
+- Friend codes: create and revoke locally stored shareable codes (Discord does not expose friend-code creation over its public API, so codes live on this PC and the invite links are built locally)
+- Voice follow: enter a friend's user ID to track a follow locally; the app resolves the user's name from Discord and stores the follow state (a standalone tool cannot drive Discord's voice client, so this is local tracking only)
 - Built-in updater fed by GitHub releases (portable package contains only the app executable)
 
 ## Disclaimer
@@ -88,6 +90,7 @@ Or use the app's auto-detect (Windows).
 src-tauri/src/config.rs                    .env handling, token detection, profiles
 src-tauri/src/badges.rs                    game badge forger
 src-tauri/src/hypesquad.rs                 HypeSquad house manager
+src-tauri/src/social.rs                    local friend codes and voice follow state
 src-tauri/src/token_extract.rs             token discovery and profiles
 src-tauri/src/updater.rs                   GitHub release updater
 src-tauri/src/main.rs                      Tauri entry point and window commands

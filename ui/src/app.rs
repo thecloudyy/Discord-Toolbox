@@ -82,7 +82,9 @@ fn append_log(target: RwSignal<String>, chunk: &str) {
 fn save_config(cfg: RwSignal<Config>) {
     let entries = cfg.get_untracked();
     spawn_local(async move {
-        api::write_env(entries).await;
+        if let Err(error) = api::write_env(entries).await {
+            web_sys::console::error_1(&format!("Failed to save config: {error}").into());
+        }
     });
 }
 
@@ -724,13 +726,19 @@ fn BadgesPage(
     quit_prompt: RwSignal<Option<(f64, usize, bool)>>,
     quitting: RwSignal<bool>,
 ) -> impl IntoView {
-    let hours = RwSignal::new("4.9935920412842105e301".to_string());
+    let hours = RwSignal::new("10".to_string());
     let games = RwSignal::new(String::new());
     let repeat = RwSignal::new(false);
 
     let forge = move || {
         let token = cfg.get_untracked().value("DISCORD_TOKEN");
-        let hours_value = hours.get_untracked().parse::<f64>().unwrap_or(0.0);
+        let hours_value = match hours.get_untracked().parse::<f64>() {
+            Ok(v) if v > 0.0 => v,
+            _ => {
+                message.set("Hours must be a positive number.".into());
+                return;
+            }
+        };
         let games_raw = games.get_untracked().trim().to_string();
         let games_value = if games_raw.is_empty() {
             0
@@ -803,11 +811,11 @@ fn BadgesPage(
                     <h2>"Run a forge"</h2>
                     <p class="muted">"One pass by default. Enable looping to keep going until Stop."</p>
                     <div class="form-grid">
-                        <Field label="Total hours" hint="Maximum 4.9936e301 per run.">
-                            <input class="input" type="number" min="0.1" max="4.9935920412842105e301" step="any" prop:value=move || hours.get() on:input=move |event| hours.set(event_value(&event)) />
+                        <Field label="Total hours" hint="Maximum 1,000,000 hours per run (backend allows more).">
+                            <input class="input" type="number" min="0.1" max="1000000" step="any" prop:value=move || hours.get() on:input=move |event| hours.set(event_value(&event)) />
                         </Field>
-                        <Field label="Games" hint="Leave blank for all games. Minimum 1.">
-                            <input class="input" type="number" min="1" step="1" placeholder="All games" prop:value=move || games.get() on:input=move |event| games.set(event_value(&event)) />
+                        <Field label="Games" hint="Leave blank for all games. Minimum 1 if specified.">
+                            <input class="input" type="text" inputmode="numeric" pattern="[0-9]*" placeholder="All games" prop:value=move || games.get() on:input=move |event| games.set(event_value(&event)) />
                         </Field>
                     </div>
                     <label class="loop-toggle">

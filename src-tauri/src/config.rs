@@ -9,9 +9,13 @@ use std::path::{Path, PathBuf};
 /// Repository root: the checkout in debug builds, and the nearest ancestor of
 /// the executable that has a Cargo.toml in release builds.
 pub(crate) fn project_root() -> PathBuf {
+    // In debug builds, CARGO_MANIFEST_DIR points to the crate directory (src-tauri).
+    // The project root is its parent.
     if cfg!(debug_assertions) {
         if let Some(dir) = Path::new(env!("CARGO_MANIFEST_DIR")).parent() {
-            return dir.to_path_buf();
+            if dir.join("Cargo.toml").is_file() {
+                return dir.to_path_buf();
+            }
         }
     }
 

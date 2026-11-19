@@ -218,16 +218,24 @@ async fn lookup_user(token: &str, user_id: &str) -> Result<String, String> {
 fn nanoid() -> String {
     const CHARS: &[u8] = b"ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
     let mut out = String::with_capacity(10);
-    let mut state: u64 = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map(|d| d.as_nanos() as u64)
-        .unwrap_or(0x9e37_79b9_7f4a_7c15)
-        ^ ((std::process::id() as u64) << 32);
-    for _ in 0..10 {
-        state ^= state << 13;
-        state ^= state >> 7;
-        state ^= state << 17;
-        out.push(CHARS[(state as usize) % CHARS.len()] as char);
+    // Use getrandom for cryptographically secure randomness
+    let mut bytes = [0u8; 10];
+    getrandom::getrandom(&mut bytes).unwrap_or_else(|_| {
+        // Fallback to time+PID based seeding if getrandom fails
+        let mut state: u64 = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map(|d| d.as_nanos() as u64)
+            .unwrap_or(0x9e37_79b9_7f4a_7c15)
+            ^ ((std::process::id() as u64) << 32);
+        for byte in &mut bytes {
+            state ^= state << 13;
+            state ^= state >> 7;
+            state ^= state << 17;
+            *byte = state as u8;
+        }
+    });
+    for byte in bytes {
+        out.push(CHARS[(byte as usize) % CHARS.len()] as char);
     }
     out
 }

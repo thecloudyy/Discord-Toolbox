@@ -684,6 +684,7 @@ version = "1.0.12"
 dependencies = [
  "aes-gcm",
  "base64 0.22.1",
+ "getrandom 0.2.17",
  "regex",
  "reqwest 0.12.28",
  "serde",

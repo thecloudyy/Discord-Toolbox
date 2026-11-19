@@ -1,6 +1,6 @@
 [package]
 name = "discord-toolbox"
-version = "1.0.12"
+version = "1.0.13"
 edition = "2021"
 description = "Discord Toolbox — keep-online and game badge tooling for Discord."
 license = "MIT"
@@ -17,6 +17,7 @@ aes-gcm = "0.10"
 base64 = "0.22"
 regex = "1"
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
+getrandom = { version = "0.2", features = [] }
 
 [features]
 # Used by release builds so the frontend is embedded instead of loaded from devUrl.

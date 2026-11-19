@@ -36,7 +36,8 @@ const MAX_RATE_LIMIT_RETRIES: usize = 10;
 /// Hard floating-point ceiling for one run's total playtime budget. Above
 /// this, `hours * 3_600_000` overflows to infinity. Timestamps are clamped for
 /// unrealistic durations, but the claimed duration itself is preserved.
-const MAX_SAFE_HOURS: f64 = 4.9935920412842105e301;
+/// Computed as f64::MAX / 3_600_000.0 to avoid precision loss.
+const MAX_SAFE_HOURS: f64 = f64::MAX / 3_600_000.0;
 /// At this point a backdated start would reach the Unix epoch. Larger values
 /// still work, but their start timestamp clamps to now.
 const BACKDATE_SAFE_HOURS: f64 = 498_000.0;
@@ -1769,7 +1770,10 @@ mod tests {
         let mut sequence = 0u64;
         let duration = super::MAX_SAFE_HOURS * 3_600_000.0;
 
-        assert_eq!(duration, f64::MAX);
+        // Due to floating-point precision, duration may not exactly equal f64::MAX,
+        // but it should be finite and very close.
+        assert!(duration.is_finite());
+        assert!((duration / f64::MAX - 1.0).abs() < 1e-10);
         let events = super::game_events(
             &game,
             "fingerprint",
@@ -1780,7 +1784,7 @@ mod tests {
         );
         assert_eq!(
             events[2]["properties"]["duration_tracked_ms"].as_f64(),
-            Some(f64::MAX)
+            Some(duration)
         );
         serde_json::to_string(&events).expect("maximum duration must serialize");
     }

@@ -18,14 +18,14 @@ const FLAG_BRAVERY: u64 = 64;
 const FLAG_BRILLIANCE: u64 = 128;
 const FLAG_BALANCE: u64 = 256;
 
-#[derive(Serialize)]
+#[derive(Clone, Serialize)]
 pub struct ProfileBadge {
     pub id: String,
     pub description: String,
     pub icon_url: Option<String>,
 }
 
-#[derive(Serialize)]
+#[derive(Clone, Serialize)]
 pub struct HypeSquadStatus {
     pub user_id: String,
     pub username: String,
@@ -105,8 +105,22 @@ async fn refresh_after_action(
     token: &str,
 ) -> Result<HypeSquadStatus, String> {
     // Discord applies the change immediately but the account flags can lag a beat.
-    tokio::time::sleep(Duration::from_millis(800)).await;
-    fetch_status_with(client, token).await
+    // Poll for up to 5 seconds until the house field changes or we time out.
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(5);
+    let mut last_status: Option<HypeSquadStatus> = None;
+    loop {
+        let status = fetch_status_with(client, token).await?;
+        if let Some(prev) = &last_status {
+            if prev.house != status.house {
+                return Ok(status);
+            }
+        }
+        last_status = Some(status.clone());
+        if tokio::time::Instant::now() >= deadline {
+            return Ok(status);
+        }
+        tokio::time::sleep(Duration::from_millis(200)).await;
+    }
 }
 
 async fn check(

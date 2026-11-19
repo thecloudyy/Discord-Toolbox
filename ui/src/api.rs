@@ -42,8 +42,8 @@ pub async fn app_config() -> Config {
     typed("app_config", json!({})).await.unwrap_or_default()
 }
 
-pub async fn write_env(entries: Config) {
-    let _ = call("write_env_multi", json!({ "entries": entries })).await;
+pub async fn write_env(entries: Config) -> Result<(), String> {
+    call("write_env_multi", json!({ "entries": entries })).await.map(|_| ())
 }
 
 pub async fn account_profile(token: String) -> Result<Profile, String> {

@@ -41,12 +41,6 @@ pub struct VoiceFollow {
     pub followed_at: Option<String>,
 }
 
-#[derive(Debug, Serialize)]
-pub struct SocialStatus {
-    pub friend_codes_count: usize,
-    pub voice_follow: Option<VoiceFollow>,
-}
-
 fn state_path() -> PathBuf {
     config_dir().join(STATE_FILE)
 }
@@ -100,16 +94,6 @@ pub async fn resolve_user(token: &str) -> Result<Value, String> {
 }
 
 // ------------------------------------------------------------------ commands
-
-#[tauri::command]
-pub async fn social_status(token: String) -> Result<SocialStatus, String> {
-    let _ = resolve_user(&token).await?;
-    let state = load_state();
-    Ok(SocialStatus {
-        friend_codes_count: state.friend_codes.len(),
-        voice_follow: state.voice_follow,
-    })
-}
 
 #[tauri::command]
 pub async fn friend_codes_list(token: String) -> Result<Vec<FriendCode>, String> {

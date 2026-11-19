@@ -93,14 +93,6 @@ pub struct HypeSquadStatus {
 }
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
-pub struct SocialStatus {
-    #[serde(default)]
-    pub friend_codes_count: usize,
-    #[serde(default)]
-    pub voice_follow: Option<VoiceFollow>,
-}
-
-#[derive(Clone, Debug, Default, Serialize, Deserialize)]
 pub struct FriendCode {
     pub code: String,
     #[serde(default)]

@@ -136,7 +136,6 @@ fn main() {
             updater::check_update,
             updater::download_update,
             updater::update_progress,
-            social::social_status,
             social::friend_codes_list,
             social::friend_code_create,
             social::friend_code_revoke_all,

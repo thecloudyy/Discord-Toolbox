@@ -109,10 +109,6 @@ pub async fn update_progress() -> Option<UpdateProgress> {
     typed("update_progress", json!({})).await.ok()
 }
 
-pub async fn social_status(token: String) -> Result<SocialStatus, String> {
-    typed("social_status", json!({ "token": token })).await
-}
-
 pub async fn friend_codes_list(token: String) -> Result<Vec<FriendCode>, String> {
     typed("friend_codes_list", json!({ "token": token })).await
 }
